@@ -7,7 +7,6 @@ import ServerSidebar from './ServerSidebar';
 import ChannelSidebar from './ChannelSidebar';
 import ChatArea from './ChatArea';
 import VoiceChannel from './VoiceChannel';
-import FeatureHub from './FeatureHub';
 import InviteModal from './InviteModal';
 import SearchModal from './SearchModal';
 import CreateServerModal from './CreateServerModal';
@@ -399,13 +398,6 @@ export default function MainApp() {
           )}
         </AnimatePresence>
       </main>
-
-      <FeatureHub
-        server={selectedServer}
-        activeChannel={selectedChannel}
-        userId={userId}
-        userName={userName}
-      />
 
       {/* Modals */}
       <AnimatePresence>
