@@ -1,10 +1,11 @@
 'use client';
 import { useEffect, useState, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Menu, X, Zap } from 'lucide-react';
+import { Menu, Users, X, Zap } from 'lucide-react';
 import AuthForm from './AuthForm';
 import ServerSidebar from './ServerSidebar';
 import ChannelSidebar from './ChannelSidebar';
+import MemberSidebar from './MemberSidebar';
 import ChatArea from './ChatArea';
 import VoiceChannel from './VoiceChannel';
 import InviteModal from './InviteModal';
@@ -15,6 +16,7 @@ import ProfileSettingsModal from './profile/ProfileSettingsModal';
 import { fadeUp } from '@/lib/animations';
 
 interface Server { id: number; name: string; icon: string | null; ownerId: number; }
+interface Member { id: number; name: string; avatar: string | null; status: string; role: string; }
 interface Channel { id: number; name: string; type: string; }
 
 export default function MainApp() {
@@ -26,6 +28,8 @@ export default function MainApp() {
   const [selectedChannel, setSelectedChannel] = useState<Channel | null>(null);
   const [userAvatar, setUserAvatar] = useState<string | null>(null);
   const [userStatus, setUserStatus] = useState('online');
+  const [members, setMembers] = useState<Member[]>([]);
+  const [showMembersPanel, setShowMembersPanel] = useState(false);
   const [showInviteModal, setShowInviteModal] = useState(false);
   const [showSearchModal, setShowSearchModal] = useState(false);
   const [showCreateModal, setShowCreateModal] = useState(false);
@@ -63,6 +67,7 @@ export default function MainApp() {
     if (!res.ok) return;
     const data = await res.json();
     setChannels(data.channels ?? []);
+    setMembers(data.members ?? []);
     if (data.channels?.length > 0) {
       const text = data.channels.find((c: Channel) => c.type === 'text') ?? data.channels[0];
       setSelectedChannel(text);
@@ -337,11 +342,40 @@ export default function MainApp() {
             <Menu size={20} />
           </button>
           {selectedServer && (
+            <>
+              <span className="font-semibold text-sm truncate" style={{ color: 'var(--text-1)' }}>
+                {selectedServer.name}
+              </span>
+              <button
+                onClick={() => setShowMembersPanel(true)}
+                className="ml-auto p-1.5 rounded-lg hover:bg-white/10 transition-colors"
+                style={{ color: 'var(--text-2)' }}
+                aria-label="Open members panel"
+              >
+                <Users size={20} />
+              </button>
+            </>
+          )}
+        </div>
+
+        {selectedServer && (
+          <div
+            className="hidden md:flex items-center justify-between px-4 py-3 border-b flex-shrink-0"
+            style={{ borderBottom: '1px solid var(--border)', background: 'var(--bg-chat)' }}
+          >
             <span className="font-semibold text-sm truncate" style={{ color: 'var(--text-1)' }}>
               {selectedServer.name}
             </span>
-          )}
-        </div>
+            <button
+              onClick={() => setShowMembersPanel(v => !v)}
+              className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold hover:bg-white/10 transition-colors"
+              style={{ color: 'var(--text-2)' }}
+            >
+              <Users size={16} />
+              Members
+            </button>
+          </div>
+        )}
 
         <AnimatePresence mode="wait">
           {!selectedChannel ? (
@@ -398,6 +432,54 @@ export default function MainApp() {
           )}
         </AnimatePresence>
       </main>
+
+      <AnimatePresence>
+        {showMembersPanel && selectedServer && (
+          <motion.aside
+            initial={{ x: 320, opacity: 0 }}
+            animate={{ x: 0, opacity: 1 }}
+            exit={{ x: 320, opacity: 0 }}
+            transition={{ duration: 0.25, ease: 'easeOut' }}
+            className="hidden md:flex flex-col h-full w-[320px]"
+            style={{ zIndex: 30 }}
+          >
+            <MemberSidebar
+              serverName={selectedServer.name}
+              ownerId={selectedServer.ownerId}
+              members={members}
+              onClose={() => setShowMembersPanel(false)}
+            />
+          </motion.aside>
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {showMembersPanel && selectedServer && (
+          <>
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="fixed inset-0 bg-black/60 z-40 md:hidden"
+              onClick={() => setShowMembersPanel(false)}
+            />
+            <motion.div
+              initial={{ x: 320, opacity: 0 }}
+              animate={{ x: 0, opacity: 1 }}
+              exit={{ x: 320, opacity: 0 }}
+              transition={{ duration: 0.25, ease: 'easeOut' }}
+              className="fixed right-0 top-0 bottom-0 z-50 w-[90vw] max-w-sm md:hidden"
+            >
+              <MemberSidebar
+                serverName={selectedServer.name}
+                ownerId={selectedServer.ownerId}
+                members={members}
+                onClose={() => setShowMembersPanel(false)}
+              />
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
 
       {/* Modals */}
       <AnimatePresence>
