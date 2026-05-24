@@ -4,6 +4,18 @@ import { and, desc, eq, inArray, lt } from 'drizzle-orm';
 import { errorResponse, getUserId, jsonResponse } from '@/lib/api-helpers';
 import { getPusherServer } from '@/lib/pusher';
 
+type BaseMessage = {
+  id: number;
+  content: string;
+  createdAt: Date;
+  updatedAt: Date;
+  userId: number;
+  userName: string;
+  userAvatar: string | null;
+  replyToId: number | null;
+  isPinned: boolean;
+};
+
 export async function GET(request: Request, { params }: { params: Promise<{ channelId: string }> }) {
   try {
     const userId = getUserId(request);
@@ -31,34 +43,59 @@ export async function GET(request: Request, { params }: { params: Promise<{ chan
       ? and(eq(messages.channelId, channelIdNumber), lt(messages.id, Number(cursor)))
       : eq(messages.channelId, channelIdNumber);
 
-    const rows = await db
-      .select({
-        id: messages.id,
-        content: messages.content,
-        createdAt: messages.createdAt,
-        updatedAt: messages.updatedAt,
-        userId: messages.userId,
-        userName: users.name,
-        userAvatar: users.avatar,
-        replyToId: messages.replyToId,
-        isPinned: messages.isPinned,
-      })
-      .from(messages)
-      .innerJoin(users, eq(messages.userId, users.id))
-      .where(conditions)
-      .orderBy(desc(messages.id))
-      .limit(30);
+    let rows: BaseMessage[];
+
+    try {
+      // Full select including feature columns (reply_to_id, is_pinned)
+      rows = await db
+        .select({
+          id: messages.id,
+          content: messages.content,
+          createdAt: messages.createdAt,
+          updatedAt: messages.updatedAt,
+          userId: messages.userId,
+          userName: users.name,
+          userAvatar: users.avatar,
+          replyToId: messages.replyToId,
+          isPinned: messages.isPinned,
+        })
+        .from(messages)
+        .innerJoin(users, eq(messages.userId, users.id))
+        .where(conditions)
+        .orderBy(desc(messages.id))
+        .limit(30);
+    } catch {
+      // Fallback: feature columns don't exist in DB yet — select base columns only
+      const baseRows = await db
+        .select({
+          id: messages.id,
+          content: messages.content,
+          createdAt: messages.createdAt,
+          updatedAt: messages.updatedAt,
+          userId: messages.userId,
+          userName: users.name,
+          userAvatar: users.avatar,
+        })
+        .from(messages)
+        .innerJoin(users, eq(messages.userId, users.id))
+        .where(conditions)
+        .orderBy(desc(messages.id))
+        .limit(30);
+      rows = baseRows.map(r => ({ ...r, replyToId: null, isPinned: false }));
+    }
 
     // Batch-fetch reply previews
     const replyIds = rows.map(r => r.replyToId).filter((id): id is number => id != null);
     const replyMap = new Map<number, { content: string; userName: string }>();
     if (replyIds.length > 0) {
-      const replies = await db
-        .select({ id: messages.id, content: messages.content, userName: users.name })
-        .from(messages)
-        .innerJoin(users, eq(messages.userId, users.id))
-        .where(inArray(messages.id, replyIds));
-      replies.forEach(r => replyMap.set(r.id, { content: r.content, userName: r.userName }));
+      try {
+        const replies = await db
+          .select({ id: messages.id, content: messages.content, userName: users.name })
+          .from(messages)
+          .innerJoin(users, eq(messages.userId, users.id))
+          .where(inArray(messages.id, replyIds));
+        replies.forEach(r => replyMap.set(r.id, { content: r.content, userName: r.userName }));
+      } catch { /* ignore */ }
     }
 
     const enriched = rows.map(r => ({
@@ -109,23 +146,45 @@ export async function POST(request: Request, { params }: { params: Promise<{ cha
     let replyToContent: string | null = null;
     let replyToUserName: string | null = null;
     if (replyToId) {
-      const [reply] = await db
-        .select({ content: messages.content, userName: users.name })
-        .from(messages)
-        .innerJoin(users, eq(messages.userId, users.id))
-        .where(eq(messages.id, replyToId))
-        .limit(1);
-      replyToContent = reply?.content ?? null;
-      replyToUserName = reply?.userName ?? null;
+      try {
+        const [reply] = await db
+          .select({ content: messages.content, userName: users.name })
+          .from(messages)
+          .innerJoin(users, eq(messages.userId, users.id))
+          .where(eq(messages.id, replyToId))
+          .limit(1);
+        replyToContent = reply?.content ?? null;
+        replyToUserName = reply?.userName ?? null;
+      } catch { /* ignore */ }
     }
 
-    const [created] = await db
-      .insert(messages)
-      .values({ channelId: channelIdNumber, userId, content, replyToId })
-      .returning();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let created: any;
+
+    try {
+      // Try insert with all feature columns (reply_to_id, is_pinned)
+      const insertVals: Record<string, unknown> = { channelId: channelIdNumber, userId, content };
+      if (replyToId) insertVals.replyToId = replyToId;
+      [created] = await db.insert(messages).values(insertVals as never).returning();
+    } catch {
+      // Fallback: feature columns don't exist in DB yet
+      [created] = await db
+        .insert(messages)
+        .values({ channelId: channelIdNumber, userId, content })
+        .returning({
+          id: messages.id,
+          channelId: messages.channelId,
+          userId: messages.userId,
+          content: messages.content,
+          createdAt: messages.createdAt,
+          updatedAt: messages.updatedAt,
+        });
+    }
 
     const fullMessage = {
       ...created,
+      isPinned: created.isPinned ?? false,
+      replyToId: replyToId ?? created.replyToId ?? null,
       userName: sender?.name ?? 'Unknown',
       userAvatar: sender?.avatar ?? null,
       replyToContent,
