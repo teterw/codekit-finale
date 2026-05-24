@@ -12,7 +12,11 @@ export async function POST(request: Request) {
       avatar?: string;
     };
 
-    const { name, email, password, avatar } = body;
+    const name = body.name?.trim();
+    const email = body.email?.trim().toLowerCase();
+    const password = body.password;
+    const avatar = body.avatar;
+
     if (!name || !email || !password) {
       return errorResponse('name, email, and password are required', 400);
     }

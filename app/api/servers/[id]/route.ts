@@ -1,16 +1,17 @@
 import { db } from '@/db';
 import { servers, channels, users, members } from '@/db/schema';
-import { and, eq } from 'drizzle-orm';
+import { and, asc, eq } from 'drizzle-orm';
 import { errorResponse, getUserId, jsonResponse } from '@/lib/api-helpers';
 
-export async function GET(request: Request, { params }: { params: { id: string } }) {
+export async function GET(request: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
     const userId = getUserId(request);
     if (!userId) {
       return errorResponse('Missing x-user-id header', 401);
     }
 
-    const serverId = Number(params.id);
+    const { id } = await params;
+    const serverId = Number(id);
     if (Number.isNaN(serverId)) {
       return errorResponse('Invalid server id', 400);
     }
@@ -31,29 +32,19 @@ export async function GET(request: Request, { params }: { params: { id: string }
     }
 
     const channelRows = await db
-      .select({
-        id: channels.id,
-        name: channels.name,
-        type: channels.type,
-        createdAt: channels.createdAt,
-      })
+      .select({ id: channels.id, name: channels.name, type: channels.type, createdAt: channels.createdAt })
       .from(channels)
       .where(eq(channels.serverId, serverId))
-      .orderBy(channels.createdAt, 'asc');
+      .orderBy(asc(channels.createdAt));
 
     const onlineMembers = await db
-      .select({
-        id: users.id,
-        name: users.name,
-        avatar: users.avatar,
-        status: users.status,
-      })
+      .select({ id: users.id, name: users.name, avatar: users.avatar, status: users.status })
       .from(users)
       .innerJoin(members, eq(members.userId, users.id))
       .where(and(eq(members.serverId, serverId), eq(users.status, 'online')));
 
     return jsonResponse({ server, channels: channelRows, onlineMembers });
-  } catch (error) {
+  } catch {
     return errorResponse('Unable to fetch server details', 500);
   }
 }

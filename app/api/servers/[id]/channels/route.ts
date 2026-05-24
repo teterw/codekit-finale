@@ -3,14 +3,15 @@ import { channels, members } from '@/db/schema';
 import { and, eq } from 'drizzle-orm';
 import { errorResponse, getUserId, jsonResponse } from '@/lib/api-helpers';
 
-export async function POST(request: Request, { params }: { params: { id: string } }) {
+export async function POST(request: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
     const userId = getUserId(request);
     if (!userId) {
       return errorResponse('Missing x-user-id header', 401);
     }
 
-    const serverId = Number(params.id);
+    const { id } = await params;
+    const serverId = Number(id);
     if (Number.isNaN(serverId)) {
       return errorResponse('Invalid server id', 400);
     }
@@ -33,13 +34,9 @@ export async function POST(request: Request, { params }: { params: { id: string 
       return errorResponse('Access denied', 403);
     }
 
-    const [created] = await db
-      .insert(channels)
-      .values({ serverId, name, type })
-      .returning();
-
+    const [created] = await db.insert(channels).values({ serverId, name, type }).returning();
     return jsonResponse({ channel: created });
-  } catch (error) {
+  } catch {
     return errorResponse('Unable to create channel', 500);
   }
 }
