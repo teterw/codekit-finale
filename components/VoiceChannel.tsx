@@ -247,14 +247,11 @@ export default function VoiceChannel({ channelId, channelName, userId, userName 
       const ch = pusher.subscribe(`voice-channel-${channelId}`);
 
       ch.bind('voice-user-joined', (p: Participant) => {
+        // The joining user already called us; just update the participant list.
+        // Calling back here would create a duplicate WebRTC connection and break audio.
         setParticipants(prev => {
           const exists = prev.some(x => x.userId === p.userId);
-          const next = exists ? prev.map(x => (x.userId === p.userId ? { ...x, ...p } : x)) : [...prev, p];
-          if (!exists && p.userId !== userId && p.peerId && peerRef.current && streamRef.current) {
-            const call = peerRef.current.call(p.peerId, streamRef.current);
-            call?.on('stream', remote => playAudio(remote, p.peerId));
-          }
-          return next;
+          return exists ? prev.map(x => (x.userId === p.userId ? { ...x, ...p } : x)) : [...prev, p];
         });
       });
 

@@ -46,8 +46,8 @@ export async function GET(request: Request, { params }: { params: Promise<{ chan
     const channelId = Number(channelIdStr);
     if (Number.isNaN(channelId)) return errorResponse('Invalid channel id', 400);
 
-    // Clean stale participants (older than 3 minutes)
-    await db.execute(sql`DELETE FROM voice_participants WHERE updated_at < NOW() - INTERVAL '3 minutes'`);
+    // Clean stale participants (older than 10 minutes — PATCH refreshes updated_at on state changes)
+    await db.execute(sql`DELETE FROM voice_participants WHERE updated_at < NOW() - INTERVAL '10 minutes'`);
 
     const participants = await getParticipantList(channelId);
     return jsonResponse({ participants });
@@ -117,7 +117,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ ch
 
     await db
       .update(voiceParticipants)
-      .set(update)
+      .set({ ...update, updatedAt: new Date() })
       .where(and(eq(voiceParticipants.channelId, channelId), eq(voiceParticipants.userId, userId)));
 
     const participants = await getParticipantList(channelId);
