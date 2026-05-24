@@ -1,8 +1,8 @@
 {
   "permissions": {
     "allow": [
-      "Bash(Get-ChildItem -Path \"c:\\\\Users\\\\tetee\\\\Documents\\\\GitHub\\\\codekit-finale\\\\codekit-finale\" -Directory)",
-      "Bash(Select-Object Name)"
+      "Bash(git *)",
+      "Bash(curl -s -o - -w \"\\\\n[HTTP %{http_code}]\\\\n\" \"http://localhost:3000/api/friends\" -H \"x-user-id: 1\")"
     ]
   }
 }
