@@ -21,6 +21,8 @@
   --warning: #faa61a;
 }
 
+html, body { height: 100%; }
+
 * {
   box-sizing: border-box;
   scrollbar-width: thin;

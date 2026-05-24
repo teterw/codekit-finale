@@ -1,11 +1,37 @@
 'use client';
-import { useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Mail, Lock, User, Zap, Eye, EyeOff } from 'lucide-react';
 import { pop } from '@/lib/animations';
 
+const GOOGLE_CLIENT_ID = '251626087919-sesiqoojhrsvts360hk42eh8gtr25sf6.apps.googleusercontent.com';
+
+declare global {
+  interface Window {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    google?: any;
+    onGoogleCredential?: (response: { credential: string }) => void;
+  }
+}
+
 interface Props {
   onAuth: (userId: number, userName: string) => void;
+}
+
+function decodeJwt(token: string) {
+  try {
+    const base64Url = token.split('.')[1];
+    const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
+    const decoded = decodeURIComponent(
+      atob(base64)
+        .split('')
+        .map(c => `%${`00${c.charCodeAt(0).toString(16)}`.slice(-2)}`)
+        .join(''),
+    );
+    return JSON.parse(decoded);
+  } catch {
+    return null;
+  }
 }
 
 export default function AuthForm({ onAuth }: Props) {
@@ -16,6 +42,73 @@ export default function AuthForm({ onAuth }: Props) {
   const [showPw, setShowPw] = useState(false);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [googleLoading, setGoogleLoading] = useState(false);
+  const buttonRef = useRef<HTMLDivElement | null>(null);
+
+  const handleGoogleResponse = useCallback(async (response: { credential?: string }) => {
+    if (!response?.credential) {
+      setError('Google did not return a credential.');
+      return;
+    }
+    const profile = decodeJwt(response.credential) as { email?: string; name?: string; picture?: string } | null;
+    if (!profile?.email || !profile?.name) {
+      setError('Unable to decode Google credential.');
+      return;
+    }
+    try {
+      setGoogleLoading(true);
+      const res = await fetch('/api/auth/google', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: profile.email, name: profile.name, avatar: profile.picture }),
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok) { setError(data?.error ?? `Google sign-in failed (${res.status})`); return; }
+      localStorage.setItem('userId', String(data.user.id));
+      localStorage.setItem('userName', data.user.name);
+      onAuth(data.user.id, data.user.name);
+    } catch {
+      setError('Google sign-in network error. Please try again.');
+    } finally {
+      setGoogleLoading(false);
+    }
+  }, [onAuth]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    window.onGoogleCredential = handleGoogleResponse;
+
+    const initializeGoogle = () => {
+      if (!window.google?.accounts?.id || !buttonRef.current) return;
+      window.google.accounts.id.initialize({
+        client_id: GOOGLE_CLIENT_ID,
+        callback: window.onGoogleCredential,
+        ux_mode: 'popup',
+        auto_select: false,
+        cancel_on_tap_outside: true,
+      });
+      window.google.accounts.id.renderButton(buttonRef.current, {
+        theme: 'filled_blue',
+        size: 'large',
+        type: 'standard',
+        width: '100%',
+      });
+    };
+
+    if (window.google?.accounts?.id) { initializeGoogle(); return; }
+
+    const script = document.createElement('script');
+    script.src = 'https://accounts.google.com/gsi/client';
+    script.async = true;
+    script.defer = true;
+    script.onload = initializeGoogle;
+    script.onerror = () => setError('Unable to load Google Sign-In. Disable ad blockers and try again.');
+    document.body.appendChild(script);
+    return () => {
+      if (document.body.contains(script)) document.body.removeChild(script);
+      window.onGoogleCredential = undefined;
+    };
+  }, [handleGoogleResponse]);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -29,8 +122,8 @@ export default function AuthForm({ onAuth }: Props) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
       });
-      const data = await res.json();
-      if (!res.ok) { setError(data.error ?? 'Something went wrong'); return; }
+      const data = await res.json().catch(() => null);
+      if (!res.ok) { setError(data?.error ?? 'Something went wrong'); return; }
       localStorage.setItem('userId', String(data.user.id));
       localStorage.setItem('userName', data.user.name);
       onAuth(data.user.id, data.user.name);
@@ -62,13 +155,30 @@ export default function AuthForm({ onAuth }: Props) {
             <h1 className="text-center font-bold text-lg mb-1" style={{ color: 'var(--text-1)' }}>
               {mode === 'login' ? 'Welcome back' : 'Create account'}
             </h1>
-            <p className="text-center text-sm mb-6" style={{ color: 'var(--text-2)' }}>
-              {mode === 'login' ? "Sign in to continue" : "Start your journey today"}
+            <p className="text-center text-sm mb-5" style={{ color: 'var(--text-2)' }}>
+              {mode === 'login' ? 'Sign in to continue' : 'Start your journey today'}
             </p>
+
+            {/* Google Sign-In */}
+            <div className="mb-4">
+              <div ref={buttonRef} className="flex justify-center" />
+              {googleLoading && (
+                <p className="text-center text-xs mt-2" style={{ color: 'var(--text-2)' }}>
+                  Signing in with Google…
+                </p>
+              )}
+            </div>
+
+            {/* Divider */}
+            <div className="flex items-center gap-3 mb-4">
+              <div className="flex-1 h-px" style={{ background: 'var(--border)' }} />
+              <span className="text-xs" style={{ color: 'var(--text-3)' }}>or</span>
+              <div className="flex-1 h-px" style={{ background: 'var(--border)' }} />
+            </div>
 
             {/* Tab switcher */}
             <div
-              className="flex rounded-lg p-1 mb-6"
+              className="flex rounded-lg p-1 mb-4"
               style={{ background: 'rgba(0,0,0,0.35)', border: '1px solid var(--border)' }}
             >
               {(['login', 'register'] as const).map(m => (
@@ -97,18 +207,32 @@ export default function AuthForm({ onAuth }: Props) {
                 {mode === 'register' && (
                   <motion.div
                     key="name-field"
-                    initial={{ opacity: 0, height: 0, marginBottom: 0 }}
-                    animate={{ opacity: 1, height: 'auto', marginBottom: 0 }}
+                    initial={{ opacity: 0, height: 0 }}
+                    animate={{ opacity: 1, height: 'auto' }}
                     exit={{ opacity: 0, height: 0 }}
                     transition={{ duration: 0.2 }}
                     className="overflow-hidden"
                   >
-                    <InputField icon={<User size={15} />} placeholder="Display name" type="text" value={name} onChange={e => setName(e.target.value)} required />
+                    <InputField
+                      icon={<User size={15} />}
+                      placeholder="Display name"
+                      type="text"
+                      value={name}
+                      onChange={e => setName(e.target.value)}
+                      required
+                    />
                   </motion.div>
                 )}
               </AnimatePresence>
 
-              <InputField icon={<Mail size={15} />} placeholder="Email address" type="email" value={email} onChange={e => setEmail(e.target.value)} required />
+              <InputField
+                icon={<Mail size={15} />}
+                placeholder="Email address"
+                type="email"
+                value={email}
+                onChange={e => setEmail(e.target.value)}
+                required
+              />
 
               <div className="relative">
                 <div className="absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" style={{ color: 'var(--text-3)' }}>

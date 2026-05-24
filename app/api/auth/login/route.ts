@@ -1,4 +1,4 @@
-import { db } from '@/db';
+import { db, ensureSchema } from '@/db';
 import { users } from '@/db/schema';
 import { eq } from 'drizzle-orm';
 import { errorResponse, jsonResponse, verifyPassword } from '@/lib/api-helpers';
@@ -13,6 +13,8 @@ export async function POST(request: Request) {
       return errorResponse('Email and password are required', 400);
     }
 
+    await ensureSchema();
+
     const [user] = await db
       .select({ id: users.id, name: users.name, email: users.email, avatar: users.avatar, password: users.password })
       .from(users)
@@ -24,7 +26,9 @@ export async function POST(request: Request) {
     }
 
     return jsonResponse({ user: { id: user.id, name: user.name, email: user.email, avatar: user.avatar } });
-  } catch {
-    return errorResponse('Unable to login', 500);
+  } catch (error) {
+    console.error('[api/auth/login] error', error);
+    const message = error instanceof Error ? error.message : String(error);
+    return errorResponse(`Unable to login: ${message}`, 500);
   }
 }
