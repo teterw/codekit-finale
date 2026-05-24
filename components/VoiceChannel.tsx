@@ -1,7 +1,7 @@
 'use client';
 import { useEffect, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
-import { Mic, MicOff, MonitorUp, Music2, PhoneOff, Radio, Volume2, VolumeX, Wand2 } from 'lucide-react';
+import { Mic, MicOff, MonitorUp, Music2, PhoneOff, Radio, Video, VideoOff, Volume2, VolumeX, Wand2 } from 'lucide-react';
 import { fadeUp } from '@/lib/animations';
 import { getPusherClient } from '@/lib/pusher-client';
 
@@ -13,6 +13,7 @@ interface Participant {
   isMuted: boolean;
   isDeafened: boolean;
   isSpeaking: boolean;
+  isCameraOn?: boolean;
 }
 
 interface Props {
@@ -31,6 +32,9 @@ export default function VoiceChannel({ channelId, channelName, userId, userName 
   const [muted, setMuted] = useState(false);
   const [deafened, setDeafened] = useState(false);
   const [speaking, setSpeaking] = useState(false);
+  const [cameraOn, setCameraOn] = useState(false);
+  const [hasCamera, setHasCamera] = useState(false);
+  const [remoteStreams, setRemoteStreams] = useState<Record<string, MediaStream>>({});
   const [error, setError] = useState('');
   const [connecting, setConnecting] = useState(false);
   const [streaming, setStreaming] = useState(false);
@@ -52,17 +56,19 @@ export default function VoiceChannel({ channelId, channelName, userId, userName 
   const speakTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const myPeerIdRef = useRef<string>('');
 
-  function playAudio(stream: MediaStream, peerId: string) {
-    dbg(`playAudio — peerId: ${peerId} | tracks: ${stream.getTracks().length} | deafened: ${deafened}`);
+  function handleRemoteStream(stream: MediaStream, peerId: string) {
+    dbg(`remote stream — peerId: ${peerId} | tracks: ${stream.getTracks().length} | deafened: ${deafened}`);
     let audio = audioRefs.current.get(peerId);
     if (!audio) {
       audio = new Audio();
       audio.autoplay = true;
       audioRefs.current.set(peerId, audio);
-      dbg(`playAudio — created new Audio element for ${peerId}`);
+      dbg(`remote stream — created new Audio element for ${peerId}`);
     }
     audio.srcObject = stream;
     audio.muted = deafened;
+    // Keep the same stream for video rendering (the video track lives in it too).
+    setRemoteStreams(prev => (prev[peerId] === stream ? prev : { ...prev, [peerId]: stream }));
   }
 
   function setupVoiceActivity(stream: MediaStream) {
@@ -106,10 +112,26 @@ export default function VoiceChannel({ channelId, channelName, userId, userName 
     setConnecting(true);
     dbg(`join() — userId: ${userId} | channelId: ${channelId}`);
     try {
-      dbg('requesting microphone…');
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+      dbg('requesting microphone + camera…');
+      // Acquire a video track up front so it is part of the WebRTC offer to every
+      // peer — toggling the camera then just flips track.enabled (no renegotiation).
+      // Fall back to audio-only if the camera is unavailable or denied.
+      let stream: MediaStream;
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: true });
+        const videoTrack = stream.getVideoTracks()[0];
+        if (videoTrack) {
+          videoTrack.enabled = false; // start with camera off
+          setHasCamera(true);
+        }
+        dbg(`mic+cam OK — audio: ${stream.getAudioTracks().length} | video: ${stream.getVideoTracks().length}`);
+      } catch {
+        dbg('camera unavailable — falling back to audio only');
+        stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+        setHasCamera(false);
+      }
       streamRef.current = stream;
-      dbg(`mic OK — tracks: ${stream.getAudioTracks().length} | track label: ${stream.getAudioTracks()[0]?.label ?? 'none'}`);
+      dbg(`media ready — track label: ${stream.getAudioTracks()[0]?.label ?? 'none'}`);
       setupVoiceActivity(stream);
 
       dbg('creating PeerJS peer…');
@@ -146,7 +168,7 @@ export default function VoiceChannel({ channelId, channelName, userId, userName 
           } else {
             call.on('stream', remote => {
               dbg(`got remote stream from ${p.peerId?.slice(0, 8)} (userId ${p.userId})`);
-              playAudio(remote, p.peerId);
+              handleRemoteStream(remote, p.peerId);
             });
             call.on('error', e => dbg(`call error to ${p.peerId?.slice(0, 8)}: ${e}`));
             call.on('close', () => dbg(`call closed with ${p.peerId?.slice(0, 8)}`));
@@ -159,7 +181,7 @@ export default function VoiceChannel({ channelId, channelName, userId, userName 
           dbg(`answered call from ${call.peer?.slice(0, 8)}`);
           call.on('stream', remote => {
             dbg(`got remote stream from incoming call peer ${call.peer?.slice(0, 8)}`);
-            playAudio(remote, call.peer);
+            handleRemoteStream(remote, call.peer);
           });
           call.on('error', e => dbg(`incoming call error from ${call.peer?.slice(0, 8)}: ${e}`));
           call.on('close', () => dbg(`incoming call closed from ${call.peer?.slice(0, 8)}`));
@@ -198,10 +220,30 @@ export default function VoiceChannel({ channelId, channelName, userId, userName 
     dbg('leave() complete');
     setJoined(false);
     setParticipants([]);
+    setRemoteStreams({});
     setSpeaking(false);
     setMuted(false);
     setDeafened(false);
+    setCameraOn(false);
+    setHasCamera(false);
     setStreaming(false);
+  }
+
+  function toggleCamera() {
+    const videoTrack = streamRef.current?.getVideoTracks()[0];
+    if (!videoTrack) {
+      setError('No camera available on this device.');
+      return;
+    }
+    const next = !cameraOn;
+    videoTrack.enabled = next;
+    setCameraOn(next);
+    dbg(`camera ${next ? 'ON' : 'OFF'}`);
+    fetch(`/api/voice/${channelId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', 'x-user-id': String(userId) },
+      body: JSON.stringify({ isCameraOn: next }),
+    }).catch(() => {});
   }
 
   function toggleMute() {
@@ -339,6 +381,7 @@ export default function VoiceChannel({ channelId, channelName, userId, userName 
     isMuted: muted,
     isDeafened: deafened,
     isSpeaking: speaking,
+    isCameraOn: cameraOn,
     userAvatar: null,
   };
   const others = participants.filter(p => p.userId !== userId);
@@ -372,7 +415,7 @@ export default function VoiceChannel({ channelId, channelName, userId, userName 
 
         {joined && (
           <motion.div variants={fadeUp} initial="hidden" animate="show" className="flex flex-wrap gap-6 justify-center">
-            <ParticipantCard participant={me} isSelf />
+            <ParticipantCard participant={me} isSelf stream={cameraOn ? streamRef.current : null} />
             <AnimatePresence>
               {others.map(p => (
                 <motion.div
@@ -382,7 +425,7 @@ export default function VoiceChannel({ channelId, channelName, userId, userName 
                   exit={{ opacity: 0, scale: 0.8 }}
                   transition={{ duration: 0.2 }}
                 >
-                  <ParticipantCard participant={p} isSelf={false} />
+                  <ParticipantCard participant={p} isSelf={false} stream={p.isCameraOn ? remoteStreams[p.peerId] ?? null : null} />
                 </motion.div>
               ))}
             </AnimatePresence>
@@ -449,6 +492,22 @@ export default function VoiceChannel({ channelId, channelName, userId, userName 
                 }}
               >
                 {deafened ? <VolumeX size={18} /> : <Volume2 size={18} />}
+              </motion.button>
+
+              <motion.button
+                onClick={toggleCamera}
+                disabled={!hasCamera}
+                whileHover={{ scale: hasCamera ? 1.06 : 1 }}
+                whileTap={{ scale: hasCamera ? 0.94 : 1 }}
+                className="w-12 h-12 rounded-xl flex items-center justify-center transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                title={!hasCamera ? 'No camera available' : cameraOn ? 'Turn off camera' : 'Turn on camera'}
+                style={{
+                  background: cameraOn ? 'var(--accent-dim)' : 'var(--bg-elevated)',
+                  color: cameraOn ? 'var(--accent)' : 'var(--text-1)',
+                  border: cameraOn ? '1px solid var(--accent-glow)' : '1px solid var(--border)',
+                }}
+              >
+                {cameraOn ? <Video size={18} /> : <VideoOff size={18} />}
               </motion.button>
 
               <motion.button
@@ -566,20 +625,40 @@ function ControlPanel({
   );
 }
 
-function ParticipantCard({ participant, isSelf }: { participant: Participant; isSelf: boolean }) {
+function VideoTile({ stream, mirror }: { stream: MediaStream; mirror?: boolean }) {
+  const ref = useRef<HTMLVideoElement>(null);
+  useEffect(() => {
+    if (ref.current && ref.current.srcObject !== stream) ref.current.srcObject = stream;
+  }, [stream]);
+  return (
+    <video
+      ref={ref}
+      autoPlay
+      playsInline
+      muted
+      className="w-full h-full object-cover"
+      style={mirror ? { transform: 'scaleX(-1)' } : undefined}
+    />
+  );
+}
+
+function ParticipantCard({ participant, isSelf, stream }: { participant: Participant; isSelf: boolean; stream?: MediaStream | null }) {
+  const showVideo = !!(participant.isCameraOn && stream);
   return (
     <div className="flex flex-col items-center gap-2">
       <div className="relative">
         <motion.div
           animate={participant.isSpeaking ? { boxShadow: ['0 0 0 0 rgba(35,209,139,0.4)', '0 0 0 8px rgba(35,209,139,0)', '0 0 0 0 rgba(35,209,139,0)'] } : {}}
           transition={{ duration: 1.2, repeat: Infinity }}
-          className="w-16 h-16 rounded-2xl flex items-center justify-center text-white font-bold text-lg overflow-hidden"
+          className={`rounded-2xl flex items-center justify-center text-white font-bold text-lg overflow-hidden ${showVideo ? 'w-48 h-32' : 'w-16 h-16'}`}
           style={{
             background: isSelf ? 'var(--accent)' : 'var(--bg-elevated)',
             border: participant.isSpeaking ? '2px solid var(--online)' : '2px solid var(--border)',
           }}
         >
-          {participant.userAvatar ? (
+          {showVideo && stream ? (
+            <VideoTile stream={stream} mirror={isSelf} />
+          ) : participant.userAvatar ? (
             <img src={participant.userAvatar} alt={participant.userName} className="w-full h-full object-cover" />
           ) : (
             participant.userName.slice(0, 2).toUpperCase()
