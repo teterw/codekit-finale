@@ -105,26 +105,23 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ ch
 
     const body = (await request.json()) as { isMuted?: boolean; isDeafened?: boolean; isSpeaking?: boolean };
 
-    const update: Partial<{ isMuted: boolean; isDeafened: boolean; isSpeaking: boolean; updatedAt: Date }> = {};
-    if (body.isMuted !== undefined) update.isMuted = body.isMuted;
-    if (body.isDeafened !== undefined) update.isDeafened = body.isDeafened;
-    if (body.isSpeaking !== undefined) update.isSpeaking = body.isSpeaking;
+    // Build SET fragments dynamically then reduce-join with commas
+    const fields: ReturnType<typeof sql>[] = [];
+    if (body.isMuted !== undefined) fields.push(sql`is_muted = ${body.isMuted}`);
+    if (body.isDeafened !== undefined) fields.push(sql`is_deafened = ${body.isDeafened}`);
+    if (body.isSpeaking !== undefined) fields.push(sql`is_speaking = ${body.isSpeaking}`);
 
-    if (Object.keys(update).length === 0) return errorResponse('No state to update', 400);
+    if (fields.length === 0) return errorResponse('No state to update', 400);
+    fields.push(sql`updated_at = NOW()`);
 
-    // Always bump updatedAt so the stale-participant cleanup doesn't evict active users
-    update.updatedAt = new Date();
-
-    await db
-      .update(voiceParticipants)
-      .set({ ...update, updatedAt: new Date() })
-      .where(and(eq(voiceParticipants.channelId, channelId), eq(voiceParticipants.userId, userId)));
+    const setClause = fields.reduce((acc, f, i) => (i === 0 ? f : sql`${acc}, ${f}`));
+    await db.execute(sql`UPDATE voice_participants SET ${setClause} WHERE channel_id = ${channelId} AND user_id = ${userId}`);
 
     const participants = await getParticipantList(channelId);
     const me = participants.find(p => p.userId === userId);
 
     try {
-      await getPusherServer().trigger(`voice-channel-${channelId}`, 'voice-user-state-updated', me ?? { userId, ...update });
+      await getPusherServer().trigger(`voice-channel-${channelId}`, 'voice-user-state-updated', me ?? { userId, ...body });
     } catch { /* Pusher not configured */ }
 
     return jsonResponse({ success: true });

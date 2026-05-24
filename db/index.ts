@@ -59,6 +59,7 @@ export function ensureFeatureColumns(): Promise<void> {
     try { await db.execute(sql`ALTER TABLE voice_participants ADD COLUMN IF NOT EXISTS is_muted boolean NOT NULL DEFAULT false`); } catch {}
     try { await db.execute(sql`ALTER TABLE voice_participants ADD COLUMN IF NOT EXISTS is_deafened boolean NOT NULL DEFAULT false`); } catch {}
     try { await db.execute(sql`ALTER TABLE voice_participants ADD COLUMN IF NOT EXISTS is_speaking boolean NOT NULL DEFAULT false`); } catch {}
+    try { await db.execute(sql`ALTER TABLE voice_participants ADD COLUMN IF NOT EXISTS updated_at timestamp NOT NULL DEFAULT NOW()`); } catch {}
   })();
   return _featureMigration;
 }
