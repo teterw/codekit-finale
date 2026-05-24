@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { motion } from 'framer-motion';
-import { Link as LinkIcon, Plus } from 'lucide-react';
+import { Compass, Plus } from 'lucide-react';
 
 interface Server {
   id: number;
@@ -27,16 +27,13 @@ interface RoutedProps {
 type Props = ControlledProps | RoutedProps;
 
 export default function ServerSidebar(props: Props) {
-  if ('userId' in props) {
-    return <RoutedServerSidebar userId={props.userId} />;
-  }
-
+  if ('userId' in props) return <RoutedServerSidebar userId={props.userId} />;
   return <ServerSidebarView {...props} />;
 }
 
 function RoutedServerSidebar({ userId }: RoutedProps) {
-  const router = useRouter();
-  const params = useParams();
+  const router   = useRouter();
+  const params   = useParams();
   const selectedId = params?.serverId ? Number(params.serverId) : null;
   const [servers, setServers] = useState<Server[]>([]);
 
@@ -58,91 +55,131 @@ function RoutedServerSidebar({ userId }: RoutedProps) {
   );
 }
 
+/* ── Server icon pill indicator ─────────────── */
+function Pill({ selected, hovered }: { selected: boolean; hovered: boolean }) {
+  const height = selected ? 40 : hovered ? 20 : 0;
+  return (
+    <div
+      className="absolute left-0 w-[4px] rounded-r-full transition-all duration-200 pointer-events-none"
+      style={{
+        background: '#F2F3F5',
+        height: `${height}px`,
+        top: '50%',
+        transform: 'translateY(-50%)',
+        opacity: selected || hovered ? 1 : 0,
+      }}
+    />
+  );
+}
+
+/* ── Individual server icon ──────────────────── */
 function ServerIcon({ server, selected, onClick }: { server: Server; selected: boolean; onClick: () => void }) {
+  const [hovered, setHovered] = useState(false);
   const initials = server.name.slice(0, 2).toUpperCase();
 
   return (
-    <div className="relative group flex items-center w-full">
-      <div
-        className="absolute left-0 w-1 rounded-r-full transition-all duration-200"
-        style={{
-          background: 'var(--text-1)',
-          height: selected ? '40px' : '8px',
-          opacity: selected ? 1 : 0,
-        }}
-      />
-      <div
-        className="absolute left-0 w-1 rounded-r-full opacity-0 group-hover:opacity-100 transition-opacity duration-200"
-        style={{ background: 'var(--text-1)', height: '20px', display: selected ? 'none' : undefined }}
-      />
+    <div
+      className="relative flex items-center w-full"
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+    >
+      <Pill selected={selected} hovered={hovered && !selected} />
 
       <motion.button
         onClick={onClick}
         title={server.name}
-        whileHover={{ scale: 1.08 }}
-        whileTap={{ scale: 0.94 }}
-        className="mx-auto w-12 h-12 flex items-center justify-center font-bold text-sm overflow-hidden transition-[border-radius] duration-200 flex-shrink-0"
+        animate={{
+          borderRadius: selected || hovered ? '30%' : '50%',
+          scale: hovered ? 1.05 : 1,
+        }}
+        whileTap={{ scale: 0.93 }}
+        transition={{ duration: 0.15 }}
+        className="mx-auto w-12 h-12 flex items-center justify-center font-bold text-sm overflow-hidden flex-shrink-0"
         style={{
-          borderRadius: selected ? '30%' : '50%',
-          background: selected ? 'var(--accent)' : 'var(--bg-elevated)',
-          boxShadow: selected ? '0 0 0 2px var(--accent), 0 4px 12px rgba(124,107,255,0.3)' : undefined,
-          color: selected ? '#fff' : 'var(--text-2)',
+          background: selected ? 'var(--accent)' : '#36393F',
+          color:      selected ? '#fff' : '#DCDDDE',
+          boxShadow:  selected ? '0 0 0 3px var(--accent), 0 2px 8px rgba(0,0,0,0.4)' : undefined,
         }}
       >
-        {server.icon ? (
-          <img src={server.icon} alt={server.name} className="w-full h-full object-cover" />
-        ) : (
-          initials
-        )}
+        {server.icon
+          ? <img src={server.icon} alt={server.name} className="w-full h-full object-cover" />
+          : initials
+        }
       </motion.button>
 
-      <div
-        className="absolute left-16 px-2.5 py-1.5 rounded-md text-xs font-semibold whitespace-nowrap opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity duration-150 z-50 shadow-xl"
-        style={{ background: '#111', color: 'var(--text-1)', border: '1px solid var(--border)' }}
-      >
-        {server.name}
-        <div
-          className="absolute left-0 top-1/2 -translate-x-1.5 -translate-y-1/2 w-1.5 h-1.5 rotate-45"
-          style={{ background: '#111', borderLeft: '1px solid var(--border)', borderBottom: '1px solid var(--border)' }}
-        />
-      </div>
+      {/* Tooltip */}
+      <Tooltip label={server.name} />
     </div>
   );
 }
 
+/* ── Action button (Add / Explore) ───────────── */
 function ActionIcon({
-  onClick,
-  title,
-  color,
-  children,
+  onClick, title, hoverBg, children,
 }: {
   onClick: () => void;
   title: string;
-  color: string;
+  hoverBg: string;
   children: React.ReactNode;
 }) {
+  const [hovered, setHovered] = useState(false);
   return (
-    <div className="relative group flex items-center w-full">
+    <div
+      className="relative flex items-center w-full"
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+    >
       <motion.button
         onClick={onClick}
-        title={title}
-        whileHover={{ scale: 1.08, borderRadius: '30%' }}
-        whileTap={{ scale: 0.94 }}
-        className="mx-auto w-12 h-12 rounded-full flex items-center justify-center transition-colors"
-        style={{ background: 'var(--bg-elevated)', color }}
+        animate={{
+          borderRadius: hovered ? '30%' : '50%',
+          scale: hovered ? 1.05 : 1,
+        }}
+        whileTap={{ scale: 0.93 }}
+        transition={{ duration: 0.15 }}
+        className="mx-auto w-12 h-12 flex items-center justify-center"
+        style={{
+          background: hovered ? hoverBg : '#36393F',
+          color:      hovered ? '#fff'   : '#3BA55C',
+        }}
       >
         {children}
       </motion.button>
-      <div
-        className="absolute left-16 px-2.5 py-1.5 rounded-md text-xs font-semibold whitespace-nowrap opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity duration-150 z-50 shadow-xl"
-        style={{ background: '#111', color: 'var(--text-1)', border: '1px solid var(--border)' }}
-      >
-        {title}
-      </div>
+
+      <Tooltip label={title} />
     </div>
   );
 }
 
+/* ── Tooltip ─────────────────────────────────── */
+function Tooltip({ label }: { label: string }) {
+  return (
+    <div
+      className="absolute left-[68px] px-3 py-1.5 rounded-[4px] text-sm font-semibold whitespace-nowrap
+                 opacity-0 group-hover:opacity-0 pointer-events-none z-50 shadow-xl
+                 [.relative:hover_&]:opacity-100"
+      style={{ background: '#111214', color: '#F2F3F5' }}
+    >
+      {label}
+      {/* Arrow */}
+      <div
+        className="absolute right-full top-1/2 -translate-y-1/2 border-4 border-transparent"
+        style={{ borderRightColor: '#111214' }}
+      />
+    </div>
+  );
+}
+
+/* ── Divider ─────────────────────────────────── */
+function Divider() {
+  return (
+    <div className="flex justify-center w-full px-2 my-0.5">
+      <div className="w-8 h-px" style={{ background: '#35363C' }} />
+    </div>
+  );
+}
+
+/* ── Main sidebar view ───────────────────────── */
 function ServerSidebarView({ servers, selectedId, onSelect, onAddServer, onJoinServer }: ControlledProps) {
   return (
     <div
@@ -158,14 +195,14 @@ function ServerSidebarView({ servers, selectedId, onSelect, onAddServer, onJoinS
         />
       ))}
 
-      <div className="w-8 my-1 flex-shrink-0" style={{ height: '1px', background: 'var(--border)' }} />
+      {servers.length > 0 && <Divider />}
 
-      <ActionIcon onClick={onAddServer} title="Create Server" color="var(--online)">
-        <Plus size={20} strokeWidth={2.5} />
+      <ActionIcon onClick={onAddServer} title="Add a Server" hoverBg="#3BA55C">
+        <Plus size={22} strokeWidth={2.5} />
       </ActionIcon>
 
-      <ActionIcon onClick={onJoinServer} title="Join Server" color="var(--accent)">
-        <LinkIcon size={18} strokeWidth={2} />
+      <ActionIcon onClick={onJoinServer} title="Explore Servers" hoverBg="#3BA55C">
+        <Compass size={20} strokeWidth={2} />
       </ActionIcon>
     </div>
   );
