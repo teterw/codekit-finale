@@ -9,14 +9,12 @@
     "lint": "eslint"
   },
   "dependencies": {
-    "@drizzle-orm/neon": "^4.0.0",
-    "@drizzle-orm/pg-core": "^4.0.0",
-    "@neondatabase/serverless": "^1.0.4",
+    "@neondatabase/serverless": "^1.1.0",
+    "drizzle-orm": "^0.45.2",
     "next": "16.2.6",
-    "next-auth": "^4.32.0",
+    "next-auth": "^4.24.14",
     "react": "19.2.4",
-    "react-dom": "19.2.4",
-    "drizzle-orm": "^4.0.0"
+    "react-dom": "19.2.4"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
