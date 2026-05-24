@@ -1,6 +1,6 @@
 import { db } from '@/db';
 import { servers, channels, users, members } from '@/db/schema';
-import { and, eq } from 'drizzle-orm';
+import { and, asc, eq } from 'drizzle-orm';
 import { errorResponse, getUserId, jsonResponse } from '@/lib/api-helpers';
 
 export async function GET(request: Request, { params }: { params: { id: string } }) {
@@ -39,7 +39,7 @@ export async function GET(request: Request, { params }: { params: { id: string }
       })
       .from(channels)
       .where(eq(channels.serverId, serverId))
-      .orderBy(channels.createdAt, 'asc');
+      .orderBy(asc(channels.createdAt));
 
     const onlineMembers = await db
       .select({

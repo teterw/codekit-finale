@@ -9,14 +9,12 @@
     "lint": "eslint"
   },
   "dependencies": {
-    "@drizzle-orm/neon": "^4.0.0",
-    "@drizzle-orm/pg-core": "^4.0.0",
     "@neondatabase/serverless": "^1.0.4",
+    "drizzle-orm": "^0.36.4",
     "next": "16.2.6",
-    "next-auth": "^4.32.0",
+    "next-auth": "^4.24.10",
     "react": "19.2.4",
-    "react-dom": "19.2.4",
-    "drizzle-orm": "^4.0.0"
+    "react-dom": "19.2.4"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
@@ -28,10 +26,6 @@
     "tailwindcss": "^4",
     "typescript": "^5"
   },
-  "ignoreScripts": [
-    "sharp",
-    "unrs-resolver"
-  ],
   "trustedDependencies": [
     "sharp",
     "unrs-resolver"

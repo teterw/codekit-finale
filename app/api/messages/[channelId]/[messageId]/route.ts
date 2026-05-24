@@ -1,5 +1,5 @@
 import { db } from '@/db';
-import { channels, messages, members } from '@/db/schema';
+import { channels, messages, members, users } from '@/db/schema';
 import { and, eq } from 'drizzle-orm';
 import { errorResponse, getUserId, jsonResponse } from '@/lib/api-helpers';
 
@@ -82,7 +82,19 @@ export async function PATCH(request: Request, { params }: { params: { channelId:
       return errorResponse('Message not found or not editable', 404);
     }
 
-    return jsonResponse({ message: updated });
+    const [user] = await db.select().from(users).where(eq(users.id, userId)).limit(1);
+
+    return jsonResponse({
+      message: {
+        id: updated.id,
+        content: updated.content,
+        createdAt: updated.createdAt,
+        updatedAt: updated.updatedAt,
+        userId: updated.userId,
+        userName: user?.name ?? '',
+        userAvatar: user?.avatar ?? null,
+      },
+    });
   } catch (error) {
     return errorResponse('Unable to update message', 500);
   }
