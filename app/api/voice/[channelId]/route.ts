@@ -70,8 +70,8 @@ export async function POST(request: Request, { params }: { params: Promise<{ cha
     const peerId = body.peerId?.trim();
     if (!peerId) return errorResponse('peerId is required', 400);
 
-    // Use Drizzle ORM upsert — avoids ON CONFLICT ON CONSTRAINT (needs named constraint,
-    // not a unique index). ON CONFLICT (column_list) works with both.
+    console.log(`[Voice POST] userId: ${userId} joining channelId: ${channelId} with peerId: ${peerId}`);
+
     await db
       .insert(voiceParticipants)
       .values({ channelId, userId, peerId, isMuted: false, isDeafened: false, isSpeaking: false })
@@ -81,14 +81,19 @@ export async function POST(request: Request, { params }: { params: Promise<{ cha
       });
 
     const participants = await getParticipantList(channelId);
+    console.log(`[Voice POST] channel ${channelId} now has ${participants.length} participant(s):`, participants.map(p => ({ userId: p.userId, peerId: p.peerId?.slice(0, 8) })));
     const me = participants.find(p => p.userId === userId);
 
     try {
       await getPusherServer().trigger(`voice-channel-${channelId}`, 'voice-user-joined', me ?? { userId, peerId });
-    } catch { /* Pusher not configured */ }
+      console.log(`[Voice POST] Pusher voice-user-joined triggered for channel ${channelId}`);
+    } catch (e) {
+      console.error(`[Voice POST] Pusher trigger FAILED:`, e);
+    }
 
     return jsonResponse({ success: true, participants });
-  } catch {
+  } catch (e) {
+    console.error(`[Voice POST] FAILED:`, e);
     return errorResponse('Unable to join voice channel', 500);
   }
 }
