@@ -3,19 +3,25 @@ import { friendships, users } from '@/db/schema';
 import { and, eq, or, sql } from 'drizzle-orm';
 import { errorResponse, getUserId, jsonResponse } from '@/lib/api-helpers';
 
-export async function ensureFriendsTable() {
-  try {
-    await db.execute(sql`
-      CREATE TABLE IF NOT EXISTS friendships (
-        id SERIAL PRIMARY KEY,
-        requester_id INTEGER NOT NULL,
-        addressee_id INTEGER NOT NULL,
-        status TEXT NOT NULL DEFAULT 'pending',
-        created_at TIMESTAMP NOT NULL DEFAULT NOW(),
-        CONSTRAINT friendships_pair_unique UNIQUE (requester_id, addressee_id)
-      )
-    `);
-  } catch { /* table already exists or no DDL permission */ }
+let _friendsTable: Promise<void> | null = null;
+
+export function ensureFriendsTable(): Promise<void> {
+  if (_friendsTable) return _friendsTable;
+  _friendsTable = (async () => {
+    try {
+      await db.execute(sql`
+        CREATE TABLE IF NOT EXISTS friendships (
+          id SERIAL PRIMARY KEY,
+          requester_id INTEGER NOT NULL,
+          addressee_id INTEGER NOT NULL,
+          status TEXT NOT NULL DEFAULT 'pending',
+          created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+          CONSTRAINT friendships_pair_unique UNIQUE (requester_id, addressee_id)
+        )
+      `);
+    } catch { /* table already exists or no DDL permission */ }
+  })();
+  return _friendsTable;
 }
 
 export async function GET(request: Request) {

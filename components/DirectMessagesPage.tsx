@@ -97,41 +97,7 @@ interface ApiMessage {
   userAvatar: string | null;
 }
 
-const requestsSeed: MessageRequest[] = [
-  {
-    id: 1,
-    name: 'Free Gold in Game',
-    handle: 'gold-drop',
-    status: 'spam',
-    title: 'Free Gold in Game',
-    preview: 'Sign up for free! Epic Legends mobile free gold at this limited link.',
-    time: 'Today at 9:18 AM',
-    accent: '#d7dce3',
-    initials: 'FG',
-  },
-  {
-    id: 2,
-    name: 'Web Bot',
-    handle: 'web.bot',
-    status: 'spam',
-    title: 'Web Bot',
-    preview: 'Hurry! Your chance to redeem free prizes is running out!',
-    time: 'Yesterday at 11:22 PM',
-    accent: '#c49a6c',
-    initials: 'WB',
-  },
-  {
-    id: 3,
-    name: 'Nia',
-    handle: 'nia.design',
-    status: 'requests',
-    title: 'Nia',
-    preview: 'Hey, are you the person building the launch community page?',
-    time: 'Today at 8:04 AM',
-    accent: '#23a55a',
-    initials: 'NI',
-  },
-];
+const requestsSeed: MessageRequest[] = [];
 
 function convDisplay(conv: Conversation, userId: number) {
   if (conv.type === 'dm') {
@@ -214,15 +180,16 @@ export default function DirectMessagesPage({ userId }: { userId: number }) {
     [userId, refreshConversations],
   );
 
-  async function addFriend(name: string) {
-    const trimmed = name.trim();
-    if (!trimmed) return;
-    await fetch('/api/friends', {
+  async function addFriend(targetUserId: number): Promise<{ ok: boolean; error?: string }> {
+    const res = await fetch('/api/friends', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'x-user-id': String(userId) },
-      body: JSON.stringify({ name: trimmed }),
+      body: JSON.stringify({ targetUserId }),
     });
     refreshFriends();
+    if (res.ok) return { ok: true };
+    const data = await res.json().catch(() => ({}));
+    return { ok: false, error: data.error ?? 'Could not send request' };
   }
 
   async function acceptFriend(friendshipId: number) {
@@ -277,6 +244,7 @@ export default function DirectMessagesPage({ userId }: { userId: number }) {
       <section className="flex min-w-0 flex-1 flex-col">
         {view === 'friends' && (
           <FriendsPanel
+            userId={userId}
             friends={friends}
             onAddFriend={addFriend}
             onAccept={acceptFriend}
@@ -337,11 +305,17 @@ export default function DirectMessagesPage({ userId }: { userId: number }) {
                 </div>
               </main>
 
-              <RequestPreview
-                request={selectedRequest}
-                onAccept={() => markRequest(selectedRequest.id, 'accepted')}
-                onReport={() => markRequest(selectedRequest.id, 'reported')}
-              />
+              {selectedRequest ? (
+                <RequestPreview
+                  request={selectedRequest}
+                  onAccept={() => markRequest(selectedRequest.id, 'accepted')}
+                  onReport={() => markRequest(selectedRequest.id, 'reported')}
+                />
+              ) : (
+                <aside className="hidden w-[450px] flex-shrink-0 flex-col items-center justify-center bg-[#313338] text-sm text-[#949ba4] xl:flex">
+                  No requests to show.
+                </aside>
+              )}
             </div>
           </>
         )}
@@ -497,19 +471,51 @@ function ConversationView({
 }
 
 function FriendsPanel({
+  userId,
   friends,
   onAddFriend,
   onAccept,
   onRemove,
   onMessage,
 }: {
+  userId: number;
   friends: FriendsState;
-  onAddFriend: (name: string) => void;
+  onAddFriend: (targetUserId: number) => Promise<{ ok: boolean; error?: string }>;
   onAccept: (id: number) => void;
   onRemove: (id: number) => void;
   onMessage: (userId: number) => void;
 }) {
-  const [name, setName] = useState('');
+  const [query, setQuery] = useState('');
+  const [results, setResults] = useState<ConvMember[]>([]);
+  const [searching, setSearching] = useState(false);
+  const [feedback, setFeedback] = useState('');
+
+  const knownIds = useMemo(() => {
+    const ids = new Set<number>();
+    [...friends.friends, ...friends.incoming, ...friends.outgoing].forEach((f) => ids.add(f.userId));
+    return ids;
+  }, [friends]);
+
+  useEffect(() => {
+    const q = query.trim();
+    if (!q) { setResults([]); return; }
+    setSearching(true);
+    const t = setTimeout(() => {
+      fetch(`/api/users?q=${encodeURIComponent(q)}`, { headers: { 'x-user-id': String(userId) } })
+        .then((res) => (res.ok ? res.json() : { users: [] }))
+        .then((data) => setResults(data.users ?? []))
+        .catch(() => setResults([]))
+        .finally(() => setSearching(false));
+    }, 250);
+    return () => clearTimeout(t);
+  }, [query, userId]);
+
+  async function handleAdd(target: ConvMember) {
+    const result = await onAddFriend(target.id);
+    setFeedback(result.ok ? `Friend request sent to ${target.name}.` : (result.error ?? 'Could not send request'));
+    setQuery('');
+    setResults([]);
+  }
 
   return (
     <>
@@ -521,25 +527,47 @@ function FriendsPanel({
       <div className="flex-1 overflow-y-auto p-6">
         <div className="mb-8 max-w-xl">
           <h3 className="text-xs font-bold uppercase tracking-wide text-[#b5bac1]">Add Friend</h3>
-          <p className="mt-1 text-sm text-[#949ba4]">You can add friends by their display name.</p>
-          <form
-            onSubmit={(e) => { e.preventDefault(); onAddFriend(name); setName(''); }}
-            className="mt-3 flex items-center gap-2 rounded-lg border border-black/40 bg-[#1e1f22] px-3 py-2"
-          >
+          <p className="mt-1 text-sm text-[#949ba4]">Search by name or email, then send a request.</p>
+          <div className="relative mt-3">
+            <Search className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[#949ba4]" size={16} />
             <input
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder="Enter a display name"
-              className="min-w-0 flex-1 bg-transparent text-sm text-[#dbdee1] outline-none placeholder:text-[#949ba4]"
+              value={query}
+              onChange={(e) => { setQuery(e.target.value); setFeedback(''); }}
+              placeholder="Search for people"
+              className="h-10 w-full rounded-lg border border-black/40 bg-[#1e1f22] pl-9 pr-3 text-sm text-[#dbdee1] outline-none placeholder:text-[#949ba4]"
             />
-            <button
-              type="submit"
-              disabled={!name.trim()}
-              className="flex items-center gap-1.5 rounded bg-[#5865f2] px-3 py-1.5 text-sm font-semibold text-white hover:bg-[#4752c4] disabled:opacity-50"
-            >
-              <UserPlus size={15} /> Send Request
-            </button>
-          </form>
+          </div>
+
+          {feedback && <p className="mt-2 text-xs text-[#23a55a]">{feedback}</p>}
+
+          {query.trim() && (
+            <div className="mt-2 overflow-hidden rounded-lg border border-black/40 bg-[#2b2d31]">
+              {searching && <p className="px-3 py-3 text-sm text-[#949ba4]">Searching…</p>}
+              {!searching && results.length === 0 && (
+                <p className="px-3 py-3 text-sm text-[#949ba4]">No users found.</p>
+              )}
+              {results.map((u) => {
+                const known = knownIds.has(u.id);
+                return (
+                  <div key={u.id} className="flex items-center gap-3 px-3 py-2 hover:bg-[#35373c]">
+                    {u.avatar ? (
+                      <img src={u.avatar} alt={u.name} className="h-8 w-8 flex-shrink-0 rounded-full object-cover" />
+                    ) : (
+                      <Avatar initials={u.name.slice(0, 2).toUpperCase()} accent={accentFor(u.id)} size="sm" />
+                    )}
+                    <span className="min-w-0 flex-1 truncate text-sm text-[#dbdee1]">{u.name}</span>
+                    <button
+                      onClick={() => handleAdd(u)}
+                      disabled={known}
+                      className="flex items-center gap-1.5 rounded bg-[#5865f2] px-3 py-1.5 text-xs font-semibold text-white hover:bg-[#4752c4] disabled:cursor-default disabled:bg-[#4e5058] disabled:opacity-70"
+                    >
+                      <UserPlus size={13} /> {known ? 'Added' : 'Add'}
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </div>
 
         {friends.incoming.length > 0 && (

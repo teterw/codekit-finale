@@ -1,8 +1,8 @@
 'use client';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { AnimatePresence, motion } from 'framer-motion';
-import { Check, Copy, Edit2, Hash, LogOut, MicOff, Settings, UserPlus, Volume2 } from 'lucide-react';
+import { Check, Copy, Edit2, Hash, LogOut, MicOff, Plus, Settings, UserPlus, Volume2, X } from 'lucide-react';
 import { getPusherClient } from '@/lib/pusher-client';
 import EditServerModal from './EditServerModal';
 
@@ -44,6 +44,7 @@ interface Props {
   onLogout: () => void;
   onServerUpdated: (server: Server) => void;
   onServerDeleted: (serverId: number) => void;
+  onChannelCreated?: (channel: Channel) => void;
 }
 
 export default function ChannelSidebar({
@@ -60,6 +61,7 @@ export default function ChannelSidebar({
   onLogout,
   onServerUpdated,
   onServerDeleted,
+  onChannelCreated,
 }: Props) {
   const router = useRouter();
   const [inviteCode, setInviteCode] = useState('');
@@ -69,6 +71,11 @@ export default function ChannelSidebar({
   const [localName, setLocalName] = useState(userName);
   const [localAvatar, setLocalAvatar] = useState(userAvatar ?? null);
   const [localStatus, setLocalStatus] = useState(userStatus ?? 'online');
+  const [creatingType, setCreatingType] = useState<'text' | 'voice' | null>(null);
+  const [newChannelName, setNewChannelName] = useState('');
+  const [createLoading, setCreateLoading] = useState(false);
+  const [createError, setCreateError] = useState('');
+  const createInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => { setLocalName(userName); }, [userName]);
   useEffect(() => { setLocalAvatar(userAvatar ?? null); }, [userAvatar]);
@@ -142,6 +149,42 @@ export default function ChannelSidebar({
     };
   }, [voiceChannels, userId]);
 
+  function openCreate(type: 'text' | 'voice') {
+    setCreatingType(type);
+    setNewChannelName('');
+    setCreateError('');
+    setTimeout(() => createInputRef.current?.focus(), 50);
+  }
+
+  function cancelCreate() {
+    setCreatingType(null);
+    setNewChannelName('');
+    setCreateError('');
+  }
+
+  async function handleCreateChannel() {
+    if (!server || !creatingType) return;
+    const name = newChannelName.trim();
+    if (!name) { setCreateError('Name is required'); return; }
+    setCreateLoading(true);
+    setCreateError('');
+    try {
+      const res = await fetch(`/api/servers/${server.id}/channels`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-user-id': String(userId) },
+        body: JSON.stringify({ name, type: creatingType }),
+      });
+      const data = await res.json();
+      if (!res.ok) { setCreateError(data.error ?? 'Failed to create'); return; }
+      onChannelCreated?.(data.channel);
+      cancelCreate();
+    } catch {
+      setCreateError('Network error');
+    } finally {
+      setCreateLoading(false);
+    }
+  }
+
   async function generateInvite() {
     if (!server) return;
     const res = await fetch('/api/invite', {
@@ -204,48 +247,68 @@ export default function ChannelSidebar({
       </div>
 
       <div className="flex-1 overflow-y-auto px-2 py-2">
-        {textChannels.length > 0 && (
-          <ChannelGroup label="Text Channels">
-            {textChannels.map(ch => (
-              <ChannelRow key={ch.id} channel={ch} selected={ch.id === selectedChannelId} onClick={() => onSelectChannel(ch)} icon={<Hash size={15} />} />
-            ))}
-          </ChannelGroup>
-        )}
+        <ChannelGroup label="Text Channels" onAdd={() => openCreate('text')}>
+          {textChannels.map(ch => (
+            <ChannelRow key={ch.id} channel={ch} selected={ch.id === selectedChannelId} onClick={() => onSelectChannel(ch)} icon={<Hash size={15} />} />
+          ))}
+          {creatingType === 'text' && (
+            <CreateChannelForm
+              inputRef={createInputRef}
+              value={newChannelName}
+              onChange={setNewChannelName}
+              onSubmit={handleCreateChannel}
+              onCancel={cancelCreate}
+              loading={createLoading}
+              error={createError}
+              placeholder="new-text-channel"
+            />
+          )}
+        </ChannelGroup>
 
-        {voiceChannels.length > 0 && (
-          <ChannelGroup label="Voice Channels">
-            {voiceChannels.map(ch => (
-              <div key={ch.id}>
-                <ChannelRow channel={ch} selected={ch.id === selectedChannelId} onClick={() => onSelectChannel(ch)} icon={<Volume2 size={15} />} />
-                {(voiceParticipants[ch.id] ?? []).map(p => (
-                  <div key={p.userId} className="flex items-center gap-1.5 pl-7 pr-2 py-0.5 rounded-md select-none">
-                    <div className="relative flex-shrink-0 w-4 h-4">
-                      {p.userAvatar ? (
-                        <img
-                          src={p.userAvatar}
-                          alt={p.userName}
-                          className="w-4 h-4 rounded-full object-cover"
-                          style={{ outline: p.isSpeaking ? '1.5px solid var(--online)' : '1.5px solid transparent', outlineOffset: '1px' }}
-                        />
-                      ) : (
-                        <div
-                          className="w-4 h-4 rounded-full flex items-center justify-center text-white font-bold"
-                          style={{ fontSize: 8, background: p.userId === userId ? 'var(--accent)' : 'var(--bg-elevated)', outline: p.isSpeaking ? '1.5px solid var(--online)' : '1.5px solid transparent', outlineOffset: '1px' }}
-                        >
-                          {p.userName.slice(0, 2).toUpperCase()}
-                        </div>
-                      )}
-                    </div>
-                    <span className="text-xs truncate flex-1" style={{ color: p.userId === userId ? 'var(--text-1)' : 'var(--text-3)' }}>
-                      {p.userName}{p.userId === userId ? ' (you)' : ''}
-                    </span>
-                    {p.isMuted && <MicOff size={9} style={{ color: 'var(--danger)', flexShrink: 0 }} />}
+        <ChannelGroup label="Voice Channels" onAdd={() => openCreate('voice')}>
+          {voiceChannels.map(ch => (
+            <div key={ch.id}>
+              <ChannelRow channel={ch} selected={ch.id === selectedChannelId} onClick={() => onSelectChannel(ch)} icon={<Volume2 size={15} />} />
+              {(voiceParticipants[ch.id] ?? []).map(p => (
+                <div key={p.userId} className="flex items-center gap-1.5 pl-7 pr-2 py-0.5 rounded-md select-none">
+                  <div className="relative flex-shrink-0 w-4 h-4">
+                    {p.userAvatar ? (
+                      <img
+                        src={p.userAvatar}
+                        alt={p.userName}
+                        className="w-4 h-4 rounded-full object-cover"
+                        style={{ outline: p.isSpeaking ? '1.5px solid var(--online)' : '1.5px solid transparent', outlineOffset: '1px' }}
+                      />
+                    ) : (
+                      <div
+                        className="w-4 h-4 rounded-full flex items-center justify-center text-white font-bold"
+                        style={{ fontSize: 8, background: p.userId === userId ? 'var(--accent)' : 'var(--bg-elevated)', outline: p.isSpeaking ? '1.5px solid var(--online)' : '1.5px solid transparent', outlineOffset: '1px' }}
+                      >
+                        {p.userName.slice(0, 2).toUpperCase()}
+                      </div>
+                    )}
                   </div>
-                ))}
-              </div>
-            ))}
-          </ChannelGroup>
-        )}
+                  <span className="text-xs truncate flex-1" style={{ color: p.userId === userId ? 'var(--text-1)' : 'var(--text-3)' }}>
+                    {p.userName}{p.userId === userId ? ' (you)' : ''}
+                  </span>
+                  {p.isMuted && <MicOff size={9} style={{ color: 'var(--danger)', flexShrink: 0 }} />}
+                </div>
+              ))}
+            </div>
+          ))}
+          {creatingType === 'voice' && (
+            <CreateChannelForm
+              inputRef={createInputRef}
+              value={newChannelName}
+              onChange={setNewChannelName}
+              onSubmit={handleCreateChannel}
+              onCancel={cancelCreate}
+              loading={createLoading}
+              error={createError}
+              placeholder="new-voice-channel"
+            />
+          )}
+        </ChannelGroup>
 
         <div className="mt-3">
           <button onClick={generateInvite} className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-xs transition-colors hover:bg-white/[0.06]" style={{ color: 'var(--text-3)' }}>
@@ -309,11 +372,63 @@ export default function ChannelSidebar({
   );
 }
 
-function ChannelGroup({ label, children }: { label: string; children: React.ReactNode }) {
+function ChannelGroup({ label, onAdd, children }: { label: string; onAdd?: () => void; children: React.ReactNode }) {
   return (
     <div className="mb-2">
-      <p className="px-2 pb-1 pt-3 text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--text-3)' }}>{label}</p>
+      <div className="flex items-center justify-between px-2 pb-1 pt-3">
+        <p className="text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--text-3)' }}>{label}</p>
+        {onAdd && (
+          <button
+            onClick={onAdd}
+            title={`Add ${label.toLowerCase()}`}
+            className="p-0.5 rounded transition-colors hover:bg-white/10"
+            style={{ color: 'var(--text-3)' }}
+          >
+            <Plus size={13} />
+          </button>
+        )}
+      </div>
       {children}
+    </div>
+  );
+}
+
+function CreateChannelForm({
+  inputRef, value, onChange, onSubmit, onCancel, loading, error, placeholder,
+}: {
+  inputRef: React.RefObject<HTMLInputElement | null>;
+  value: string;
+  onChange: (v: string) => void;
+  onSubmit: () => void;
+  onCancel: () => void;
+  loading: boolean;
+  error: string;
+  placeholder: string;
+}) {
+  return (
+    <div className="mt-1 mb-1 mx-1 rounded-lg p-2" style={{ background: 'var(--bg-elevated)', border: '1px solid var(--border)' }}>
+      <form onSubmit={e => { e.preventDefault(); onSubmit(); }}>
+        <div className="flex items-center gap-1">
+          <input
+            ref={inputRef}
+            value={value}
+            onChange={e => onChange(e.target.value.toLowerCase().replace(/[^a-z0-9-_]/g, ''))}
+            placeholder={placeholder}
+            maxLength={32}
+            disabled={loading}
+            className="flex-1 text-xs rounded px-2 py-1 outline-none min-w-0"
+            style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', color: 'var(--text-1)' }}
+            onKeyDown={e => { if (e.key === 'Escape') onCancel(); }}
+          />
+          <button type="submit" disabled={loading || !value.trim()} className="p-1 rounded transition-colors hover:bg-white/10 disabled:opacity-40" style={{ color: 'var(--accent)' }} title="Create">
+            <Check size={13} />
+          </button>
+          <button type="button" onClick={onCancel} className="p-1 rounded transition-colors hover:bg-white/10" style={{ color: 'var(--text-3)' }} title="Cancel">
+            <X size={13} />
+          </button>
+        </div>
+        {error && <p className="text-xs mt-1" style={{ color: 'var(--danger)' }}>{error}</p>}
+      </form>
     </div>
   );
 }
