@@ -1,4 +1,4 @@
-import { db, ensureProfileColumns } from '@/db';
+import { db } from '@/db';
 import { users } from '@/db/schema';
 import { eq } from 'drizzle-orm';
 import { errorResponse, getUserId, jsonResponse } from '@/lib/api-helpers';
@@ -7,8 +7,6 @@ import { getPusherServer } from '@/lib/pusher';
 export async function DELETE(request: Request) {
   const userId = getUserId(request);
   if (!userId) return errorResponse('Unauthorized', 401);
-
-  await ensureProfileColumns();
 
   const [updated] = await db
     .update(users)

@@ -1,4 +1,4 @@
-import { db, ensureProfileColumns } from '@/db';
+import { db } from '@/db';
 import { users } from '@/db/schema';
 import { eq } from 'drizzle-orm';
 import { errorResponse, getUserId, jsonResponse } from '@/lib/api-helpers';
@@ -13,8 +13,6 @@ export async function GET(
   const { userId } = await params;
   const id = Number(userId);
   if (isNaN(id)) return errorResponse('Invalid user id', 400);
-
-  await ensureProfileColumns();
 
   const [user] = await db
     .select({
