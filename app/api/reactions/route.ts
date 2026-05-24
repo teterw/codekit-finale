@@ -64,7 +64,7 @@ export async function GET(request: Request) {
     return jsonResponse({ reactions: summarizeReactions(rows, userId) });
   } catch (err) {
     console.error('[reactions GET] error:', err);
-    return jsonResponse({ reactions: {} });
+    return errorResponse('Unable to load reactions. Run db/reactions.sql in your database if message_reactions does not exist.', 500);
   }
 }
 
@@ -120,6 +120,6 @@ export async function POST(request: Request) {
     return jsonResponse({ reactions });
   } catch (err) {
     console.error('[reactions POST] error:', err);
-    return errorResponse('Unable to save reaction: ' + String(err), 500);
+    return errorResponse('Unable to save reaction. Run db/reactions.sql in your database if message_reactions does not exist. ' + String(err), 500);
   }
 }

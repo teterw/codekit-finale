@@ -349,6 +349,11 @@ export default function ChatArea({ channelId, channelName, userId, userName, onO
         body: JSON.stringify({ messageId, channelId, emoji }),
       });
       const text = await res.text();
+      if (!res.ok) {
+        console.error('[reaction] save failed', res.status, text);
+        fetchReactions([messageId]);
+        return;
+      }
       if (res.ok) {
         const data = JSON.parse(text);
         setReactionsMap(prev => ({ ...prev, [messageId]: data.reactions }));
