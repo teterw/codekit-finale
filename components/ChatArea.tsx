@@ -319,16 +319,21 @@ export default function ChatArea({ channelId, channelName, userId, userName, onO
     });
 
     try {
+      console.log('[reaction] sending', { messageId, channelId, emoji, userId });
       const res = await fetch('/api/reactions', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'x-user-id': String(userId) },
         body: JSON.stringify({ messageId, channelId, emoji }),
       });
+      const text = await res.text();
+      console.log('[reaction] response', res.status, text);
       if (res.ok) {
-        const data = await res.json();
+        const data = JSON.parse(text);
         setReactionsMap(prev => ({ ...prev, [messageId]: data.reactions }));
       }
-    } catch { }
+    } catch (err) {
+      console.error('[reaction] fetch error', err);
+    }
   }, [channelId, userId]);
 
   const handleUpdated = useCallback((updated: Message) => {
