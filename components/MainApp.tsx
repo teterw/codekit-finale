@@ -3,7 +3,7 @@ import { useEffect, useState, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Menu, Users, X, Zap } from 'lucide-react';
-import AuthForm from './AuthForm';
+import LandingPage from './LandingPage';
 import ServerSidebar from './ServerSidebar';
 import ChannelSidebar from './ChannelSidebar';
 import MemberSidebar from './MemberSidebar';
@@ -117,12 +117,6 @@ export default function MainApp() {
     };
   }, [userId, fetchServers, fetchServerDetails]);
 
-  function handleAuth(uid: number, name: string) {
-    setUserId(uid);
-    setUserName(name);
-    router.push('/direct-messages');
-  }
-
   function handleLogout() {
     localStorage.removeItem('userId');
     localStorage.removeItem('userName');
@@ -201,7 +195,7 @@ export default function MainApp() {
     );
   }
 
-  if (!userId) return <AuthForm onAuth={handleAuth} />;
+  if (!userId) return <LandingPage />;
 
   if (servers.length === 0) {
     return (
