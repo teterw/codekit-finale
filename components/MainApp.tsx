@@ -107,6 +107,33 @@ export default function MainApp() {
     }
   }
 
+  function handleServerUpdated(updatedServer: Server) {
+    setServers(prev => prev.map(server => (server.id === updatedServer.id ? updatedServer : server)));
+    if (selectedServer?.id === updatedServer.id) {
+      setSelectedServer(updatedServer);
+    }
+  }
+
+  function handleServerDeleted(serverId: number) {
+    setServers(prev => {
+      const remaining = prev.filter(server => server.id !== serverId);
+      if (selectedServer?.id === serverId) {
+        if (remaining.length > 0) {
+          const next = remaining[0];
+          setSelectedServer(next);
+          if (userId) {
+            fetchServerDetails(userId, next.id);
+          }
+        } else {
+          setSelectedServer(null);
+          setChannels([]);
+          setSelectedChannel(null);
+        }
+      }
+      return remaining;
+    });
+  }
+
   if (loading) {
     return (
       <div className="flex items-center justify-center min-h-screen" style={{ background: 'var(--bg)' }}>
@@ -206,6 +233,8 @@ export default function MainApp() {
           userName={userName}
           onSelectChannel={ch => { setSelectedChannel(ch); }}
           onCreateInvite={() => {}}
+          onServerUpdated={handleServerUpdated}
+          onServerDeleted={handleServerDeleted}
           onLogout={handleLogout}
         />
       </div>
@@ -243,6 +272,8 @@ export default function MainApp() {
                 userName={userName}
                 onSelectChannel={ch => { setSelectedChannel(ch); setMobileSidebarOpen(false); }}
                 onCreateInvite={() => {}}
+                onServerUpdated={handleServerUpdated}
+                onServerDeleted={handleServerDeleted}
                 onLogout={handleLogout}
               />
             </motion.div>

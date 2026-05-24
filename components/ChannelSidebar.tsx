@@ -1,10 +1,11 @@
 'use client';
 import { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Hash, Volume2, UserPlus, Copy, Check, ChevronDown, LogOut } from 'lucide-react';
+import { Hash, Volume2, UserPlus, Copy, Check, ChevronDown, LogOut, Edit2 } from 'lucide-react';
+import EditServerModal from './EditServerModal';
 
 interface Channel { id: number; name: string; type: string; }
-interface Server { id: number; name: string; ownerId: number; }
+interface Server { id: number; name: string; icon: string | null; ownerId: number; }
 
 interface Props {
   server: Server | null;
@@ -15,15 +16,18 @@ interface Props {
   onSelectChannel: (channel: Channel) => void;
   onCreateInvite: () => void;
   onLogout: () => void;
+  onServerUpdated: (server: Server) => void;
+  onServerDeleted: (serverId: number) => void;
 }
 
 export default function ChannelSidebar({
   server, channels, selectedChannelId, userId, userName,
-  onSelectChannel, onLogout,
+  onSelectChannel, onCreateInvite, onLogout, onServerUpdated, onServerDeleted,
 }: Props) {
   const [inviteCode, setInviteCode] = useState('');
   const [copied, setCopied] = useState(false);
   const [showInvite, setShowInvite] = useState(false);
+  const [showEditServer, setShowEditServer] = useState(false);
 
   const textChannels = channels.filter(c => c.type === 'text');
   const voiceChannels = channels.filter(c => c.type === 'voice');
@@ -59,17 +63,47 @@ export default function ChannelSidebar({
     );
   }
 
+  const canManageServer = server.ownerId === userId;
+  const serverInitials = server.name.slice(0, 2).toUpperCase();
+
   return (
     <div className="w-60 min-w-[240px] flex flex-col" style={{ background: 'var(--bg-channels)' }}>
       {/* Server header */}
       <div
-        className="flex items-center justify-between px-4 py-3.5 cursor-pointer hover:bg-white/[0.04] transition-colors flex-shrink-0"
+        className="flex items-center justify-between px-4 py-3.5 hover:bg-white/[0.04] transition-colors flex-shrink-0"
         style={{ borderBottom: '1px solid var(--border)' }}
       >
-        <h2 className="font-semibold text-sm truncate" style={{ color: 'var(--text-1)' }}>
-          {server.name}
-        </h2>
-        <ChevronDown size={16} className="flex-shrink-0" style={{ color: 'var(--text-2)' }} />
+        <div className="flex items-center gap-3 min-w-0">
+          <div className="w-10 h-10 rounded-2xl overflow-hidden bg-slate-950 border border-white/10 flex items-center justify-center flex-shrink-0">
+            {server.icon ? (
+              <img src={server.icon} alt={server.name} className="w-full h-full object-cover" />
+            ) : (
+              <span className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-300">
+                {serverInitials}
+              </span>
+            )}
+          </div>
+
+          <div className="min-w-0">
+            <h2 className="font-semibold text-sm truncate" style={{ color: 'var(--text-1)' }}>
+              {server.name}
+            </h2>
+            <p className="text-[11px] uppercase tracking-[0.24em] mt-0.5" style={{ color: 'var(--text-3)' }}>
+              {canManageServer ? 'Server owner' : 'Server member'}
+            </p>
+          </div>
+        </div>
+
+        {canManageServer && (
+          <button
+            onClick={() => setShowEditServer(true)}
+            className="p-2 rounded-xl transition-colors hover:bg-white/[0.06]"
+            title="Edit server"
+            style={{ color: 'var(--text-2)' }}
+          >
+            <Edit2 size={16} />
+          </button>
+        )}
       </div>
 
       {/* Channels */}
@@ -173,6 +207,24 @@ export default function ChannelSidebar({
           <LogOut size={15} />
         </button>
       </div>
+
+      <AnimatePresence>
+        {showEditServer && (
+          <EditServerModal
+            server={server}
+            currentUserId={userId}
+            onUpdated={updatedServer => {
+              onServerUpdated(updatedServer);
+              setShowEditServer(false);
+            }}
+            onDeleted={deletedServerId => {
+              onServerDeleted(deletedServerId);
+              setShowEditServer(false);
+            }}
+            onClose={() => setShowEditServer(false)}
+          />
+        )}
+      </AnimatePresence>
     </div>
   );
 }
