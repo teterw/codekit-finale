@@ -40,17 +40,15 @@ export default function VoiceChannel({ channelId, channelName, userId, userName 
   const [streaming, setStreaming] = useState(false);
   const [voiceEffect, setVoiceEffect] = useState('Clean');
   const [lastClip, setLastClip] = useState('');
-  const [debugLog, setDebugLog] = useState<string[]>([]);
 
   function dbg(msg: string) {
-    const line = `[${new Date().toISOString().slice(11, 23)}] ${msg}`;
-    console.log('[Voice debug]', line);
-    setDebugLog(prev => [...prev.slice(-29), line]);
+    console.log('[Voice debug]', `[${new Date().toISOString().slice(11, 23)}] ${msg}`);
   }
 
   const peerRef = useRef<import('peerjs').Peer | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const screenStreamRef = useRef<MediaStream | null>(null);
+  const callsRef = useRef<Map<string, import('peerjs').MediaConnection>>(new Map());
   const audioRefs = useRef<Map<string, HTMLAudioElement>>(new Map());
   const animFrameRef = useRef<number>(0);
   const speakTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -166,25 +164,27 @@ export default function VoiceChannel({ channelId, channelName, userId, userName 
           if (!call) {
             dbg(`ERROR — peer.call returned null for peerId ${p.peerId?.slice(0, 8)}`);
           } else {
+            callsRef.current.set(p.peerId, call);
             call.on('stream', remote => {
               dbg(`got remote stream from ${p.peerId?.slice(0, 8)} (userId ${p.userId})`);
               handleRemoteStream(remote, p.peerId);
             });
             call.on('error', e => dbg(`call error to ${p.peerId?.slice(0, 8)}: ${e}`));
-            call.on('close', () => dbg(`call closed with ${p.peerId?.slice(0, 8)}`));
+            call.on('close', () => { dbg(`call closed with ${p.peerId?.slice(0, 8)}`); callsRef.current.delete(p.peerId); });
           }
         }
 
         peer.on('call', call => {
           dbg(`incoming call from peer ${call.peer?.slice(0, 8)}`);
           call.answer(stream);
+          callsRef.current.set(call.peer, call);
           dbg(`answered call from ${call.peer?.slice(0, 8)}`);
           call.on('stream', remote => {
             dbg(`got remote stream from incoming call peer ${call.peer?.slice(0, 8)}`);
             handleRemoteStream(remote, call.peer);
           });
           call.on('error', e => dbg(`incoming call error from ${call.peer?.slice(0, 8)}: ${e}`));
-          call.on('close', () => dbg(`incoming call closed from ${call.peer?.slice(0, 8)}`));
+          call.on('close', () => { dbg(`incoming call closed from ${call.peer?.slice(0, 8)}`); callsRef.current.delete(call.peer); });
         });
       });
 
@@ -211,6 +211,7 @@ export default function VoiceChannel({ channelId, channelName, userId, userName 
     streamRef.current?.getTracks().forEach(t => t.stop());
     screenStreamRef.current?.getTracks().forEach(t => t.stop());
     peerRef.current?.destroy();
+    callsRef.current.clear();
     audioRefs.current.forEach(a => { a.srcObject = null; });
     audioRefs.current.clear();
     await fetch(`/api/voice/${channelId}`, {
@@ -275,11 +276,38 @@ export default function VoiceChannel({ channelId, channelName, userId, userName 
     }).catch(() => {});
   }
 
+  // Swap the outgoing video track on every active peer connection. replaceTrack
+  // reuses the already-negotiated video sender, so no renegotiation is needed.
+  function replaceOutgoingVideo(track: MediaStreamTrack | null) {
+    callsRef.current.forEach(call => {
+      const pc = call.peerConnection;
+      const sender = pc?.getSenders().find(s => s.track?.kind === 'video');
+      if (sender) sender.replaceTrack(track).catch(() => {});
+    });
+  }
+
+  function broadcastCameraState(on: boolean) {
+    fetch(`/api/voice/${channelId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', 'x-user-id': String(userId) },
+      body: JSON.stringify({ isCameraOn: on }),
+    }).catch(() => {});
+  }
+
+  function stopStream() {
+    screenStreamRef.current?.getTracks().forEach(track => track.stop());
+    screenStreamRef.current = null;
+    // Revert peers to the camera track (kept disabled unless the camera is on).
+    const camTrack = streamRef.current?.getVideoTracks()[0] ?? null;
+    replaceOutgoingVideo(camTrack);
+    setStreaming(false);
+    broadcastCameraState(cameraOn);
+    dbg('screen share stopped');
+  }
+
   async function toggleStream() {
     if (streaming) {
-      screenStreamRef.current?.getTracks().forEach(track => track.stop());
-      screenStreamRef.current = null;
-      setStreaming(false);
+      stopStream();
       return;
     }
 
@@ -287,18 +315,25 @@ export default function VoiceChannel({ channelId, channelName, userId, userName 
       setError('Screen sharing is not supported in this browser.');
       return;
     }
+    if (callsRef.current.size > 0 && !streamRef.current?.getVideoTracks()[0]) {
+      setError('Screen sharing needs camera access granted at join time on this setup.');
+      return;
+    }
 
     try {
       setError('');
       const screenStream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true });
       screenStreamRef.current = screenStream;
-      screenStream.getTracks().forEach(track => {
-        track.addEventListener('ended', () => {
-          screenStreamRef.current = null;
-          setStreaming(false);
-        }, { once: true });
-      });
+      const screenTrack = screenStream.getVideoTracks()[0];
+
+      // Send the screen to every peer and let them render it in our video tile.
+      replaceOutgoingVideo(screenTrack);
       setStreaming(true);
+      broadcastCameraState(true);
+      dbg('screen share started');
+
+      // Browser-native "Stop sharing" button ends the track.
+      screenTrack?.addEventListener('ended', () => stopStream(), { once: true });
     } catch {
       setError('Could not start screen share.');
     }
@@ -381,9 +416,10 @@ export default function VoiceChannel({ channelId, channelName, userId, userName 
     isMuted: muted,
     isDeafened: deafened,
     isSpeaking: speaking,
-    isCameraOn: cameraOn,
+    isCameraOn: cameraOn || streaming,
     userAvatar: null,
   };
+  const myStream = streaming ? screenStreamRef.current : cameraOn ? streamRef.current : null;
   const others = participants.filter(p => p.userId !== userId);
 
   return (
@@ -415,7 +451,7 @@ export default function VoiceChannel({ channelId, channelName, userId, userName 
 
         {joined && (
           <motion.div variants={fadeUp} initial="hidden" animate="show" className="flex flex-wrap gap-6 justify-center">
-            <ParticipantCard participant={me} isSelf stream={cameraOn ? streamRef.current : null} />
+            <ParticipantCard participant={me} isSelf stream={myStream} mirror={cameraOn && !streaming} />
             <AnimatePresence>
               {others.map(p => (
                 <motion.div
@@ -437,18 +473,6 @@ export default function VoiceChannel({ channelId, channelName, userId, userName 
         )}
 
         {error && <p className="text-sm text-center" style={{ color: 'var(--danger)' }}>{error}</p>}
-
-        {/* DEBUG PANEL — remove once voice is fixed */}
-        {debugLog.length > 0 && (
-          <div className="w-full max-w-2xl rounded-lg p-2 text-[10px] font-mono leading-relaxed" style={{ background: '#0d1117', border: '1px solid #30363d', maxHeight: 180, overflowY: 'auto' }}>
-            <p className="text-yellow-400 mb-1 font-bold">Voice Debug Log (userId {userId} | ch {channelId})</p>
-            {debugLog.map((line, i) => (
-              <p key={i} style={{ color: line.includes('ERROR') || line.includes('FAIL') || line.includes('error') ? '#f85149' : line.includes('OK') || line.includes('stream') || line.includes('succeeded') ? '#3fb950' : line.includes('Pusher') ? '#79c0ff' : '#8b949e' }}>
-                {line}
-              </p>
-            ))}
-          </div>
-        )}
 
         <div className="flex gap-3">
           {!joined && !connecting ? (
@@ -642,7 +666,7 @@ function VideoTile({ stream, mirror }: { stream: MediaStream; mirror?: boolean }
   );
 }
 
-function ParticipantCard({ participant, isSelf, stream }: { participant: Participant; isSelf: boolean; stream?: MediaStream | null }) {
+function ParticipantCard({ participant, isSelf, stream, mirror }: { participant: Participant; isSelf: boolean; stream?: MediaStream | null; mirror?: boolean }) {
   const showVideo = !!(participant.isCameraOn && stream);
   return (
     <div className="flex flex-col items-center gap-2">
@@ -657,7 +681,7 @@ function ParticipantCard({ participant, isSelf, stream }: { participant: Partici
           }}
         >
           {showVideo && stream ? (
-            <VideoTile stream={stream} mirror={isSelf} />
+            <VideoTile stream={stream} mirror={mirror ?? isSelf} />
           ) : participant.userAvatar ? (
             <img src={participant.userAvatar} alt={participant.userName} className="w-full h-full object-cover" />
           ) : (
