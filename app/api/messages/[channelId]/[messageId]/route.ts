@@ -3,15 +3,16 @@ import { channels, messages, members, users } from '@/db/schema';
 import { and, eq } from 'drizzle-orm';
 import { errorResponse, getUserId, jsonResponse } from '@/lib/api-helpers';
 
-export async function POST(request: Request, { params }: { params: { channelId: string; messageId: string } }) {
+export async function POST(request: Request, { params }: { params: Promise<{ channelId: string; messageId: string }> }) {
   try {
     const userId = getUserId(request);
     if (!userId) {
       return errorResponse('Missing x-user-id header', 401);
     }
 
-    const channelId = Number(params.channelId);
-    if (Number.isNaN(channelId)) {
+    const { channelId } = await params;
+    const channelIdNumber = Number(channelId);
+    if (Number.isNaN(channelIdNumber)) {
       return errorResponse('Invalid channel id', 400);
     }
 
@@ -21,7 +22,7 @@ export async function POST(request: Request, { params }: { params: { channelId: 
       return errorResponse('Message content is required', 400);
     }
 
-    const [channel] = await db.select().from(channels).where(eq(channels.id, channelId)).limit(1);
+    const [channel] = await db.select().from(channels).where(eq(channels.id, channelIdNumber)).limit(1);
     if (!channel) {
       return errorResponse('Channel not found', 404);
     }
@@ -38,7 +39,7 @@ export async function POST(request: Request, { params }: { params: { channelId: 
 
     const [created] = await db
       .insert(messages)
-      .values({ channelId, userId, content })
+      .values({ channelId: channelIdNumber, userId, content })
       .returning();
 
     return jsonResponse({ message: created }, 201);
@@ -47,16 +48,17 @@ export async function POST(request: Request, { params }: { params: { channelId: 
   }
 }
 
-export async function PATCH(request: Request, { params }: { params: { channelId: string; messageId: string } }) {
+export async function PATCH(request: Request, { params }: { params: Promise<{ channelId: string; messageId: string }> }) {
   try {
     const userId = getUserId(request);
     if (!userId) {
       return errorResponse('Missing x-user-id header', 401);
     }
 
-    const channelId = Number(params.channelId);
-    const messageId = Number(params.messageId);
-    if (Number.isNaN(channelId) || Number.isNaN(messageId)) {
+    const { channelId, messageId } = await params;
+    const channelIdNumber = Number(channelId);
+    const messageIdNumber = Number(messageId);
+    if (Number.isNaN(channelIdNumber) || Number.isNaN(messageIdNumber)) {
       return errorResponse('Invalid channel id or message id', 400);
     }
 
@@ -71,8 +73,8 @@ export async function PATCH(request: Request, { params }: { params: { channelId:
       .set({ content, updatedAt: new Date() })
       .where(
         and(
-          eq(messages.id, messageId),
-          eq(messages.channelId, channelId),
+          eq(messages.id, messageIdNumber),
+          eq(messages.channelId, channelIdNumber),
           eq(messages.userId, userId),
         ),
       )
@@ -100,16 +102,17 @@ export async function PATCH(request: Request, { params }: { params: { channelId:
   }
 }
 
-export async function DELETE(request: Request, { params }: { params: { channelId: string; messageId: string } }) {
+export async function DELETE(request: Request, { params }: { params: Promise<{ channelId: string; messageId: string }> }) {
   try {
     const userId = getUserId(request);
     if (!userId) {
       return errorResponse('Missing x-user-id header', 401);
     }
 
-    const channelId = Number(params.channelId);
-    const messageId = Number(params.messageId);
-    if (Number.isNaN(channelId) || Number.isNaN(messageId)) {
+    const { channelId, messageId } = await params;
+    const channelIdNumber = Number(channelId);
+    const messageIdNumber = Number(messageId);
+    if (Number.isNaN(channelIdNumber) || Number.isNaN(messageIdNumber)) {
       return errorResponse('Invalid channel id or message id', 400);
     }
 
@@ -117,8 +120,8 @@ export async function DELETE(request: Request, { params }: { params: { channelId
       .delete(messages)
       .where(
         and(
-          eq(messages.id, messageId),
-          eq(messages.channelId, channelId),
+          eq(messages.id, messageIdNumber),
+          eq(messages.channelId, channelIdNumber),
           eq(messages.userId, userId),
         ),
       );

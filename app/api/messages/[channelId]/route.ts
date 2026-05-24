@@ -3,19 +3,20 @@ import { channels, messages, users, members } from '@/db/schema';
 import { and, desc, eq, lt } from 'drizzle-orm';
 import { errorResponse, getUserId, jsonResponse } from '@/lib/api-helpers';
 
-export async function POST(request: Request, { params }: { params: { channelId: string } }) {
+export async function POST(request: Request, { params }: { params: Promise<{ channelId: string }> }) {
   try {
     const userId = getUserId(request);
     if (!userId) return errorResponse('Missing x-user-id header', 401);
 
-    const channelId = Number(params.channelId);
-    if (Number.isNaN(channelId)) return errorResponse('Invalid channel id', 400);
+    const { channelId } = await params;
+    const channelIdNumber = Number(channelId);
+    if (Number.isNaN(channelIdNumber)) return errorResponse('Invalid channel id', 400);
 
     const body = (await request.json()) as { content?: string };
     const content = body.content?.trim();
     if (!content) return errorResponse('Content is required', 400);
 
-    const [channel] = await db.select().from(channels).where(eq(channels.id, channelId)).limit(1);
+    const [channel] = await db.select().from(channels).where(eq(channels.id, channelIdNumber)).limit(1);
     if (!channel) return errorResponse('Channel not found', 404);
 
     const membership = await db
@@ -27,7 +28,7 @@ export async function POST(request: Request, { params }: { params: { channelId: 
 
     const [msg] = await db
       .insert(messages)
-      .values({ channelId, userId, content })
+      .values({ channelId: channelIdNumber, userId, content })
       .returning();
 
     const [user] = await db.select().from(users).where(eq(users.id, userId)).limit(1);
@@ -48,19 +49,20 @@ export async function POST(request: Request, { params }: { params: { channelId: 
   }
 }
 
-export async function GET(request: Request, { params }: { params: { channelId: string } }) {
+export async function GET(request: Request, { params }: { params: Promise<{ channelId: string }> }) {
   try {
     const userId = getUserId(request);
     if (!userId) {
       return errorResponse('Missing x-user-id header', 401);
     }
 
-    const channelId = Number(params.channelId);
-    if (Number.isNaN(channelId)) {
+    const { channelId } = await params;
+    const channelIdNumber = Number(channelId);
+    if (Number.isNaN(channelIdNumber)) {
       return errorResponse('Invalid channel id', 400);
     }
 
-    const [channel] = await db.select().from(channels).where(eq(channels.id, channelId)).limit(1);
+    const [channel] = await db.select().from(channels).where(eq(channels.id, channelIdNumber)).limit(1);
     if (!channel) {
       return errorResponse('Channel not found', 404);
     }
@@ -77,7 +79,11 @@ export async function GET(request: Request, { params }: { params: { channelId: s
 
     const url = new URL(request.url);
     const cursor = url.searchParams.get('cursor');
-    const query = db
+    const conditions = cursor
+      ? and(eq(messages.channelId, channelIdNumber), lt(messages.id, Number(cursor)))
+      : eq(messages.channelId, channelIdNumber);
+
+    const rows = await db
       .select({
         id: messages.id,
         content: messages.content,
@@ -89,15 +95,10 @@ export async function GET(request: Request, { params }: { params: { channelId: s
       })
       .from(messages)
       .innerJoin(users, eq(messages.userId, users.id))
-      .where(
-        cursor
-          ? and(eq(messages.channelId, channelId), lt(messages.id, Number(cursor)))
-          : eq(messages.channelId, channelId),
-      )
+      .where(conditions)
       .orderBy(desc(messages.id))
       .limit(30);
 
-    const rows = await query;
     const nextCursor = rows.length > 0 ? rows[rows.length - 1].id : null;
 
     return jsonResponse({ messages: rows, nextCursor });
