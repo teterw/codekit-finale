@@ -49,6 +49,16 @@ export const ourFileRouter = {
       console.log('[UT onUploadComplete] returning url:', url);
       return { url };
     }),
+
+  messageImage: f({ image: { maxFileSize: '8MB', maxFileCount: 1 } })
+    .middleware(async ({ req }) => {
+      const userId = Number(req.headers.get('x-user-id'));
+      if (!userId || isNaN(userId)) throw new UploadThingError('Unauthorized');
+      return { userId };
+    })
+    .onUploadComplete(async ({ file }) => {
+      return { url: file.ufsUrl };
+    }),
 } satisfies FileRouter;
 
 export type OurFileRouter = typeof ourFileRouter;

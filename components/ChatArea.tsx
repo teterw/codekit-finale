@@ -2,8 +2,9 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
-import { ArrowDown, Hash, MessageCircle, Pin, Search, Send, X } from 'lucide-react';
+import { ArrowDown, Hash, ImagePlus, MessageCircle, Pin, Search, Send, X } from 'lucide-react';
 import { getPusherClient } from '@/lib/pusher-client';
+import { useUploadThing } from '@/lib/uploadthing';
 import MessageItem from './MessageItem';
 import TypingIndicator from './TypingIndicator';
 
@@ -81,6 +82,10 @@ export default function ChatArea({ channelId, channelName, userId, userName, onO
   const bottomRef = useRef<HTMLDivElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const { startUpload, isUploading } = useUploadThing('messageImage', {
+    headers: { 'x-user-id': String(userId) },
+  });
   const typingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isTypingRef = useRef(false);
   const messagesRef = useRef<Message[]>([]);
@@ -384,16 +389,41 @@ export default function ChatArea({ channelId, channelName, userId, userName, onO
     setIsDraggingOver(false);
   }
 
+  async function sendImage(file: File) {
+    if (!file.type.startsWith('image/') || isUploading) return;
+    try {
+      const result = await startUpload([file]);
+      const uploaded = result?.[0];
+      const url = (uploaded?.serverData as { url?: string } | undefined)?.url ?? uploaded?.ufsUrl;
+      if (!url) return;
+
+      const res = await fetch(`/api/messages/${channelId}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-user-id': String(userId) },
+        body: JSON.stringify({ content: `![image](${url})` }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        const message = data.message as Message;
+        setMessages(prev => (prev.some(m => m.id === message.id) ? prev : [...prev, message]));
+        setTimeout(() => bottomRef.current?.scrollIntoView({ behavior: 'smooth' }), 50);
+      }
+    } catch {
+      // Upload failed — nothing persisted, so just drop it.
+    }
+  }
+
   async function handleDrop(event: React.DragEvent) {
     event.preventDefault();
     setIsDraggingOver(false);
     const file = event.dataTransfer.files?.[0];
-    if (!file || !file.type.startsWith('image/')) return;
-    await fetch(`/api/messages/${channelId}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'x-user-id': String(userId) },
-      body: JSON.stringify({ content: `[Image: ${file.name}]` }),
-    });
+    if (file) await sendImage(file);
+  }
+
+  async function handleFilePick(event: React.ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (file) await sendImage(file);
   }
 
   function sendThreadReply(event: React.FormEvent) {
@@ -588,6 +618,23 @@ export default function ChatArea({ channelId, channelName, userId, userName, onO
 
         <form onSubmit={sendMessage}>
           <div className="flex items-center gap-3 px-4 rounded-xl transition-shadow" style={{ background: 'var(--bg-elevated)', border: '1px solid var(--border)' }}>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/*"
+              className="hidden"
+              onChange={handleFilePick}
+            />
+            <button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={isUploading}
+              title="Upload image"
+              className="flex-shrink-0 flex h-7 w-7 items-center justify-center rounded-lg transition-colors hover:bg-white/10 disabled:opacity-40"
+              style={{ color: 'var(--text-3)' }}
+            >
+              <ImagePlus size={16} />
+            </button>
             <textarea
               ref={inputRef}
               value={input}

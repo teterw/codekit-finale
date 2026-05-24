@@ -245,6 +245,16 @@ function MessageItem({
                     {children}
                   </a>
                 ),
+                img: ({ src, alt }) => (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={typeof src === 'string' ? src : ''}
+                    alt={alt ?? 'image'}
+                    className="mt-1 max-h-80 max-w-full cursor-pointer rounded-lg"
+                    style={{ border: '1px solid var(--border)' }}
+                    onClick={() => { if (typeof src === 'string') window.open(src, '_blank'); }}
+                  />
+                ),
               }}
             >
               {message.content}
