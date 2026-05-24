@@ -6,19 +6,21 @@ import { getPusherServer } from '@/lib/pusher';
 
 async function ensureVoiceTable() {
   await ensureFeatureColumns();
-  await db.execute(sql`
-    CREATE TABLE IF NOT EXISTS voice_participants (
-      id SERIAL PRIMARY KEY,
-      channel_id INTEGER NOT NULL,
-      user_id INTEGER NOT NULL,
-      peer_id TEXT NOT NULL,
-      is_muted BOOLEAN NOT NULL DEFAULT false,
-      is_deafened BOOLEAN NOT NULL DEFAULT false,
-      is_speaking BOOLEAN NOT NULL DEFAULT false,
-      updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
-      CONSTRAINT voice_participants_channel_user UNIQUE (channel_id, user_id)
-    )
-  `);
+  try {
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS voice_participants (
+        id SERIAL PRIMARY KEY,
+        channel_id INTEGER NOT NULL,
+        user_id INTEGER NOT NULL,
+        peer_id TEXT NOT NULL,
+        is_muted BOOLEAN NOT NULL DEFAULT false,
+        is_deafened BOOLEAN NOT NULL DEFAULT false,
+        is_speaking BOOLEAN NOT NULL DEFAULT false,
+        updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
+        CONSTRAINT voice_participants_channel_user UNIQUE (channel_id, user_id)
+      )
+    `);
+  } catch { /* table already exists or no DDL permission */ }
 }
 
 async function getParticipantList(channelId: number) {
@@ -68,12 +70,15 @@ export async function POST(request: Request, { params }: { params: Promise<{ cha
     const peerId = body.peerId?.trim();
     if (!peerId) return errorResponse('peerId is required', 400);
 
-    await db.execute(sql`
-      INSERT INTO voice_participants (channel_id, user_id, peer_id, is_muted, is_deafened, is_speaking)
-      VALUES (${channelId}, ${userId}, ${peerId}, false, false, false)
-      ON CONFLICT ON CONSTRAINT voice_participants_channel_user
-      DO UPDATE SET peer_id = ${peerId}, is_muted = false, is_deafened = false, is_speaking = false, updated_at = NOW()
-    `);
+    // Use Drizzle ORM upsert — avoids ON CONFLICT ON CONSTRAINT (needs named constraint,
+    // not a unique index). ON CONFLICT (column_list) works with both.
+    await db
+      .insert(voiceParticipants)
+      .values({ channelId, userId, peerId, isMuted: false, isDeafened: false, isSpeaking: false })
+      .onConflictDoUpdate({
+        target: [voiceParticipants.channelId, voiceParticipants.userId],
+        set: { peerId, isMuted: false, isDeafened: false, isSpeaking: false, updatedAt: new Date() },
+      });
 
     const participants = await getParticipantList(channelId);
     const me = participants.find(p => p.userId === userId);
@@ -100,12 +105,15 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ ch
 
     const body = (await request.json()) as { isMuted?: boolean; isDeafened?: boolean; isSpeaking?: boolean };
 
-    const update: Partial<{ isMuted: boolean; isDeafened: boolean; isSpeaking: boolean }> = {};
+    const update: Partial<{ isMuted: boolean; isDeafened: boolean; isSpeaking: boolean; updatedAt: Date }> = {};
     if (body.isMuted !== undefined) update.isMuted = body.isMuted;
     if (body.isDeafened !== undefined) update.isDeafened = body.isDeafened;
     if (body.isSpeaking !== undefined) update.isSpeaking = body.isSpeaking;
 
     if (Object.keys(update).length === 0) return errorResponse('No state to update', 400);
+
+    // Always bump updatedAt so the stale-participant cleanup doesn't evict active users
+    update.updatedAt = new Date();
 
     await db
       .update(voiceParticipants)

@@ -20,18 +20,14 @@ let _profileMigration: Promise<void> | null = null;
 export function ensureProfileColumns(): Promise<void> {
   if (_profileMigration) return _profileMigration;
   _profileMigration = (async () => {
+    try { await db.execute(sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS username text`); } catch {}
+    try { await db.execute(sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS bio text`); } catch {}
+    try { await db.execute(sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS updated_at timestamp`); } catch {}
     try {
-      await db.execute(sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS username text`);
-      await db.execute(sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS bio text`);
-      await db.execute(sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS updated_at timestamp`);
       await db.execute(
         sql`CREATE UNIQUE INDEX IF NOT EXISTS users_username_unique ON users(username) WHERE username IS NOT NULL`,
       );
-    } catch (e) {
-      console.error('[db] profile migration failed', e);
-      _profileMigration = null;
-      throw e;
-    }
+    } catch {}
   })();
   return _profileMigration;
 }
@@ -41,10 +37,9 @@ let _featureMigration: Promise<void> | null = null;
 export function ensureFeatureColumns(): Promise<void> {
   if (_featureMigration) return _featureMigration;
   _featureMigration = (async () => {
+    try { await db.execute(sql`ALTER TABLE messages ADD COLUMN IF NOT EXISTS reply_to_id integer`); } catch {}
+    try { await db.execute(sql`ALTER TABLE messages ADD COLUMN IF NOT EXISTS is_pinned boolean NOT NULL DEFAULT false`); } catch {}
     try {
-      await db.execute(sql`ALTER TABLE messages ADD COLUMN IF NOT EXISTS reply_to_id integer`);
-      await db.execute(sql`ALTER TABLE messages ADD COLUMN IF NOT EXISTS is_pinned boolean NOT NULL DEFAULT false`);
-
       await db.execute(sql`
         CREATE TABLE IF NOT EXISTS message_reactions (
           id serial PRIMARY KEY,
@@ -54,19 +49,16 @@ export function ensureFeatureColumns(): Promise<void> {
           created_at timestamp NOT NULL DEFAULT now()
         )
       `);
+    } catch {}
+    try {
       await db.execute(sql`
         CREATE UNIQUE INDEX IF NOT EXISTS message_reactions_unique
         ON message_reactions(message_id, user_id, emoji)
       `);
-
-      await db.execute(sql`ALTER TABLE voice_participants ADD COLUMN IF NOT EXISTS is_muted boolean NOT NULL DEFAULT false`);
-      await db.execute(sql`ALTER TABLE voice_participants ADD COLUMN IF NOT EXISTS is_deafened boolean NOT NULL DEFAULT false`);
-      await db.execute(sql`ALTER TABLE voice_participants ADD COLUMN IF NOT EXISTS is_speaking boolean NOT NULL DEFAULT false`);
-    } catch (e) {
-      console.error('[db] feature migration failed', e);
-      _featureMigration = null;
-      throw e;
-    }
+    } catch {}
+    try { await db.execute(sql`ALTER TABLE voice_participants ADD COLUMN IF NOT EXISTS is_muted boolean NOT NULL DEFAULT false`); } catch {}
+    try { await db.execute(sql`ALTER TABLE voice_participants ADD COLUMN IF NOT EXISTS is_deafened boolean NOT NULL DEFAULT false`); } catch {}
+    try { await db.execute(sql`ALTER TABLE voice_participants ADD COLUMN IF NOT EXISTS is_speaking boolean NOT NULL DEFAULT false`); } catch {}
   })();
   return _featureMigration;
 }
