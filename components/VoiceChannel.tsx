@@ -1,14 +1,18 @@
 'use client';
 import { useEffect, useRef, useState } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
-import { Mic, MicOff, MonitorUp, Music2, PhoneOff, Radio, Volume2, Wand2 } from 'lucide-react';
+import { AnimatePresence, motion } from 'framer-motion';
+import { Mic, MicOff, MonitorUp, Music2, PhoneOff, Radio, Volume2, VolumeX, Wand2 } from 'lucide-react';
 import { fadeUp } from '@/lib/animations';
+import { getPusherClient } from '@/lib/pusher-client';
 
 interface Participant {
   userId: number;
   peerId: string;
   userName: string;
   userAvatar: string | null;
+  isMuted: boolean;
+  isDeafened: boolean;
+  isSpeaking: boolean;
 }
 
 interface Props {
@@ -18,119 +22,170 @@ interface Props {
   userName: string;
 }
 
+const SPEAK_THRESHOLD = 18;
+const SPEAK_DEBOUNCE = 600;
+
 export default function VoiceChannel({ channelId, channelName, userId, userName }: Props) {
   const [joined, setJoined] = useState(false);
   const [participants, setParticipants] = useState<Participant[]>([]);
   const [muted, setMuted] = useState(false);
+  const [deafened, setDeafened] = useState(false);
   const [speaking, setSpeaking] = useState(false);
   const [error, setError] = useState('');
   const [connecting, setConnecting] = useState(false);
   const [streaming, setStreaming] = useState(false);
   const [voiceEffect, setVoiceEffect] = useState('Clean');
   const [lastClip, setLastClip] = useState('');
+  const [debugLog, setDebugLog] = useState<string[]>([]);
+
+  function dbg(msg: string) {
+    const line = `[${new Date().toISOString().slice(11, 23)}] ${msg}`;
+    console.log('[Voice debug]', line);
+    setDebugLog(prev => [...prev.slice(-29), line]);
+  }
 
   const peerRef = useRef<import('peerjs').Peer | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const screenStreamRef = useRef<MediaStream | null>(null);
   const audioRefs = useRef<Map<string, HTMLAudioElement>>(new Map());
-  const analyserRef = useRef<AnalyserNode | null>(null);
   const animFrameRef = useRef<number>(0);
-  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
-
-  async function getParticipants(): Promise<Participant[]> {
-    const res = await fetch(`/api/voice/${channelId}`, { headers: { 'x-user-id': String(userId) } });
-    if (!res.ok) return [];
-    const data = await res.json();
-    return data.participants ?? [];
-  }
+  const speakTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const myPeerIdRef = useRef<string>('');
 
   function playAudio(stream: MediaStream, peerId: string) {
+    dbg(`playAudio — peerId: ${peerId} | tracks: ${stream.getTracks().length} | deafened: ${deafened}`);
     let audio = audioRefs.current.get(peerId);
     if (!audio) {
       audio = new Audio();
       audio.autoplay = true;
       audioRefs.current.set(peerId, audio);
+      dbg(`playAudio — created new Audio element for ${peerId}`);
     }
     audio.srcObject = stream;
+    audio.muted = deafened;
   }
 
   function setupVoiceActivity(stream: MediaStream) {
-    const ctx = new AudioContext();
-    const source = ctx.createMediaStreamSource(stream);
-    const analyser = ctx.createAnalyser();
-    analyser.fftSize = 256;
-    source.connect(analyser);
-    analyserRef.current = analyser;
-    const data = new Uint8Array(analyser.frequencyBinCount);
-    function tick() {
-      analyser.getByteFrequencyData(data);
-      const avg = data.reduce((a, b) => a + b, 0) / data.length;
-      setSpeaking(avg > 15);
-      animFrameRef.current = requestAnimationFrame(tick);
+    try {
+      const ctx = new AudioContext();
+      const source = ctx.createMediaStreamSource(stream);
+      const analyser = ctx.createAnalyser();
+      analyser.fftSize = 256;
+      source.connect(analyser);
+      const data = new Uint8Array(analyser.frequencyBinCount);
+      let wasSpeaking = false;
+
+      function tick() {
+        analyser.getByteFrequencyData(data);
+        const avg = data.reduce((a, b) => a + b, 0) / data.length;
+        const nowSpeaking = avg > SPEAK_THRESHOLD;
+
+        if (nowSpeaking !== wasSpeaking) {
+          wasSpeaking = nowSpeaking;
+          setSpeaking(nowSpeaking);
+
+          if (speakTimerRef.current) clearTimeout(speakTimerRef.current);
+          speakTimerRef.current = setTimeout(() => {
+            fetch(`/api/voice/${channelId}`, {
+              method: 'PATCH',
+              headers: { 'Content-Type': 'application/json', 'x-user-id': String(userId) },
+              body: JSON.stringify({ isSpeaking: nowSpeaking }),
+            }).catch(() => {});
+          }, SPEAK_DEBOUNCE);
+        }
+        animFrameRef.current = requestAnimationFrame(tick);
+      }
+      tick();
+    } catch {
+      // AudioContext can fail when browser audio is unavailable.
     }
-    tick();
   }
 
   async function join() {
     setError('');
     setConnecting(true);
+    dbg(`join() — userId: ${userId} | channelId: ${channelId}`);
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      dbg('requesting microphone…');
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
       streamRef.current = stream;
+      dbg(`mic OK — tracks: ${stream.getAudioTracks().length} | track label: ${stream.getAudioTracks()[0]?.label ?? 'none'}`);
       setupVoiceActivity(stream);
 
+      dbg('creating PeerJS peer…');
       const { Peer } = await import('peerjs');
       const peer = new Peer();
       peerRef.current = peer;
 
-      peer.on('open', async (myPeerId) => {
-        await fetch(`/api/voice/${channelId}`, {
+      peer.on('open', async myPeerId => {
+        myPeerIdRef.current = myPeerId;
+        dbg(`peer.on(open) — myPeerId: ${myPeerId}`);
+
+        dbg(`POST /api/voice/${channelId} with peerId: ${myPeerId}`);
+        const res = await fetch(`/api/voice/${channelId}`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'x-user-id': String(userId) },
           body: JSON.stringify({ peerId: myPeerId }),
         });
+        dbg(`POST response status: ${res.status}`);
+        const data = await res.json();
+        const allParticipants: Participant[] = data.participants ?? [];
+        dbg(`participants from API: ${allParticipants.length} — ${JSON.stringify(allParticipants.map(p => ({ uid: p.userId, peer: p.peerId?.slice(0, 8) })))}`);
 
+        const others = allParticipants.filter(p => p.userId !== userId);
+        dbg(`others to call: ${others.length}`);
+        setParticipants(allParticipants);
         setJoined(true);
         setConnecting(false);
 
-        const others = await getParticipants();
-        setParticipants(others);
-
         for (const p of others) {
-          if (p.peerId === myPeerId) continue;
+          dbg(`calling peer ${p.peerId?.slice(0, 8)}… (userId ${p.userId})`);
           const call = peer.call(p.peerId, stream);
-          call.on('stream', remote => playAudio(remote, p.peerId));
+          if (!call) {
+            dbg(`ERROR — peer.call returned null for peerId ${p.peerId?.slice(0, 8)}`);
+          } else {
+            call.on('stream', remote => {
+              dbg(`got remote stream from ${p.peerId?.slice(0, 8)} (userId ${p.userId})`);
+              playAudio(remote, p.peerId);
+            });
+            call.on('error', e => dbg(`call error to ${p.peerId?.slice(0, 8)}: ${e}`));
+            call.on('close', () => dbg(`call closed with ${p.peerId?.slice(0, 8)}`));
+          }
         }
 
         peer.on('call', call => {
+          dbg(`incoming call from peer ${call.peer?.slice(0, 8)}`);
           call.answer(stream);
-          call.on('stream', remote => playAudio(remote, call.peer));
+          dbg(`answered call from ${call.peer?.slice(0, 8)}`);
+          call.on('stream', remote => {
+            dbg(`got remote stream from incoming call peer ${call.peer?.slice(0, 8)}`);
+            playAudio(remote, call.peer);
+          });
+          call.on('error', e => dbg(`incoming call error from ${call.peer?.slice(0, 8)}: ${e}`));
+          call.on('close', () => dbg(`incoming call closed from ${call.peer?.slice(0, 8)}`));
         });
-
-        pollRef.current = setInterval(async () => {
-          const list = await getParticipants();
-          setParticipants(list);
-          for (const p of list) {
-            if (p.peerId === myPeerId || audioRefs.current.has(p.peerId)) continue;
-            const call = peer.call(p.peerId, stream);
-            call.on('stream', remote => playAudio(remote, p.peerId));
-          }
-        }, 5000);
       });
 
+      peer.on('disconnected', () => dbg('peer DISCONNECTED from signaling server'));
+      peer.on('close', () => dbg('peer CLOSED'));
       peer.on('error', err => {
-        if ((err as Error).message?.includes('Could not connect')) return;
-        console.warn('PeerJS:', err);
+        const msg = (err as Error).message ?? String(err);
+        dbg(`peer ERROR: ${msg}`);
+        if (!msg.includes('Could not connect') && !msg.includes('Lost connection')) {
+          console.warn('PeerJS:', err);
+        }
       });
-    } catch {
-      setError('Could not access microphone. Please allow microphone access.');
+    } catch (e) {
+      dbg(`join() FAILED: ${e}`);
+      setError('Could not access microphone. Please allow microphone access and try again.');
       setConnecting(false);
     }
   }
 
   async function leave() {
+    dbg('leave() called');
     cancelAnimationFrame(animFrameRef.current);
-    if (pollRef.current) clearInterval(pollRef.current);
+    if (speakTimerRef.current) clearTimeout(speakTimerRef.current);
     streamRef.current?.getTracks().forEach(t => t.stop());
     screenStreamRef.current?.getTracks().forEach(t => t.stop());
     peerRef.current?.destroy();
@@ -139,16 +194,43 @@ export default function VoiceChannel({ channelId, channelName, userId, userName 
     await fetch(`/api/voice/${channelId}`, {
       method: 'DELETE',
       headers: { 'x-user-id': String(userId) },
-    });
+    }).catch(() => {});
+    dbg('leave() complete');
     setJoined(false);
     setParticipants([]);
     setSpeaking(false);
+    setMuted(false);
+    setDeafened(false);
     setStreaming(false);
   }
 
   function toggleMute() {
     const track = streamRef.current?.getAudioTracks()[0];
-    if (track) { track.enabled = !track.enabled; setMuted(!track.enabled); }
+    if (!track) return;
+    const newMuted = !muted;
+    track.enabled = !newMuted;
+    setMuted(newMuted);
+    fetch(`/api/voice/${channelId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', 'x-user-id': String(userId) },
+      body: JSON.stringify({ isMuted: newMuted }),
+    }).catch(() => {});
+  }
+
+  function toggleDeafen() {
+    const newDeafened = !deafened;
+    setDeafened(newDeafened);
+    const track = streamRef.current?.getAudioTracks()[0];
+    if (track) {
+      track.enabled = !newDeafened;
+      setMuted(newDeafened);
+    }
+    audioRefs.current.forEach(a => { a.muted = newDeafened; });
+    fetch(`/api/voice/${channelId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', 'x-user-id': String(userId) },
+      body: JSON.stringify({ isDeafened: newDeafened, isMuted: newDeafened }),
+    }).catch(() => {});
   }
 
   async function toggleStream() {
@@ -200,76 +282,97 @@ export default function VoiceChannel({ channelId, channelName, userId, userName 
   }
 
   useEffect(() => {
+    if (!joined) return;
+    let pusher: ReturnType<typeof getPusherClient> | null = null;
+    try {
+      dbg(`subscribing Pusher to voice-channel-${channelId}`);
+      pusher = getPusherClient(userId);
+      const ch = pusher.subscribe(`voice-channel-${channelId}`);
+
+      ch.bind('pusher:subscription_succeeded', () => dbg('Pusher subscription_succeeded'));
+      ch.bind('pusher:subscription_error', (e: unknown) => dbg(`Pusher subscription_error: ${JSON.stringify(e)}`));
+
+      ch.bind('voice-user-joined', (p: Participant) => {
+        dbg(`Pusher voice-user-joined — userId: ${p.userId} | peerId: ${p.peerId?.slice(0, 8)}`);
+        setParticipants(prev => {
+          const exists = prev.some(x => x.userId === p.userId);
+          dbg(`voice-user-joined — exists in list: ${exists} | list size before: ${prev.length}`);
+          return exists ? prev.map(x => (x.userId === p.userId ? { ...x, ...p } : x)) : [...prev, p];
+        });
+      });
+
+      ch.bind('voice-user-left', ({ userId: leftId }: { userId: number }) => {
+        dbg(`Pusher voice-user-left — userId: ${leftId}`);
+        setParticipants(prev => {
+          const leaving = prev.find(p => p.userId === leftId);
+          if (leaving) {
+            const audio = audioRefs.current.get(leaving.peerId);
+            if (audio) { audio.srcObject = null; audioRefs.current.delete(leaving.peerId); }
+          }
+          return prev.filter(p => p.userId !== leftId);
+        });
+      });
+
+      ch.bind('voice-user-state-updated', (updated: Partial<Participant> & { userId: number }) => {
+        dbg(`Pusher voice-user-state-updated — userId: ${updated.userId}`);
+        setParticipants(prev => prev.map(p => (p.userId === updated.userId ? { ...p, ...updated } : p)));
+      });
+    } catch (e) {
+      dbg(`Pusher setup ERROR: ${e}`);
+    }
+
+    return () => {
+      try { pusher?.unsubscribe(`voice-channel-${channelId}`); dbg('Pusher unsubscribed'); } catch { /* ignore */ }
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [joined, channelId, userId]);
+
+  useEffect(() => {
     return () => { if (joined) leave(); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  const me: Participant = {
+    userId,
+    userName,
+    peerId: myPeerIdRef.current,
+    isMuted: muted,
+    isDeafened: deafened,
+    isSpeaking: speaking,
+    userAvatar: null,
+  };
   const others = participants.filter(p => p.userId !== userId);
 
   return (
     <div className="flex flex-col flex-1 min-w-0" style={{ background: 'var(--bg-chat)' }}>
-      {/* Header */}
-      <div
-        className="flex items-center gap-2 px-4 py-3 flex-shrink-0"
-        style={{ borderBottom: '1px solid var(--border)' }}
-      >
+      <div className="flex items-center gap-2 px-4 py-3 flex-shrink-0" style={{ borderBottom: '1px solid var(--border)' }}>
         <Volume2 size={18} style={{ color: 'var(--accent)' }} />
         <h3 className="font-semibold text-sm" style={{ color: 'var(--text-1)' }}>{channelName}</h3>
-        <span
-          className="text-xs px-2 py-0.5 rounded-full"
-          style={{ background: 'var(--accent-dim)', color: 'var(--accent)' }}
-        >
-          Voice
-        </span>
-        {joined && (
-          <span className="ml-auto text-xs" style={{ color: 'var(--text-3)' }}>
-            {participants.length} connected
-          </span>
-        )}
+        <span className="text-xs px-2 py-0.5 rounded-full" style={{ background: 'var(--accent-dim)', color: 'var(--accent)' }}>Voice</span>
+        {joined && <span className="ml-auto text-xs" style={{ color: 'var(--text-3)' }}>{participants.length} connected</span>}
       </div>
 
-      {/* Main area */}
       <div className="flex-1 flex flex-col items-center justify-center gap-8 p-8">
-        {/* Status */}
         {!joined && !connecting && (
-          <motion.div
-            variants={fadeUp}
-            initial="hidden"
-            animate="show"
-            className="text-center"
-          >
-            <div
-              className="w-20 h-20 rounded-2xl flex items-center justify-center mx-auto mb-5"
-              style={{ background: 'var(--accent-dim)', border: '1px solid var(--accent-glow)' }}
-            >
+          <motion.div variants={fadeUp} initial="hidden" animate="show" className="text-center">
+            <div className="w-20 h-20 rounded-2xl flex items-center justify-center mx-auto mb-5" style={{ background: 'var(--accent-dim)', border: '1px solid var(--accent-glow)' }}>
               <Radio size={36} style={{ color: 'var(--accent)' }} />
             </div>
-            <h3 className="font-bold text-lg mb-2" style={{ color: 'var(--text-1)' }}>
-              {channelName}
-            </h3>
-            <p className="text-sm mb-6" style={{ color: 'var(--text-2)' }}>
-              Join to talk with others in this voice channel
-            </p>
+            <h3 className="font-bold text-lg mb-2" style={{ color: 'var(--text-1)' }}>{channelName}</h3>
+            <p className="text-sm mb-6" style={{ color: 'var(--text-2)' }}>Join to talk with others in this voice channel</p>
           </motion.div>
         )}
 
-        {/* Participant grid */}
+        {connecting && (
+          <motion.div variants={fadeUp} initial="hidden" animate="show" className="text-center">
+            <div className="w-16 h-16 rounded-full border-4 border-t-transparent border-[var(--accent)] animate-spin mx-auto mb-4" />
+            <p style={{ color: 'var(--text-2)' }}>Connecting...</p>
+          </motion.div>
+        )}
+
         {joined && (
-          <motion.div
-            variants={fadeUp}
-            initial="hidden"
-            animate="show"
-            className="flex flex-wrap gap-6 justify-center"
-          >
-            {/* Self */}
-            <ParticipantCard
-              name={userName}
-              avatar={null}
-              isSelf
-              speaking={speaking && !muted}
-              muted={muted}
-            />
-            {/* Others */}
+          <motion.div variants={fadeUp} initial="hidden" animate="show" className="flex flex-wrap gap-6 justify-center">
+            <ParticipantCard participant={me} isSelf />
             <AnimatePresence>
               {others.map(p => (
                 <motion.div
@@ -279,45 +382,51 @@ export default function VoiceChannel({ channelId, channelName, userId, userName 
                   exit={{ opacity: 0, scale: 0.8 }}
                   transition={{ duration: 0.2 }}
                 >
-                  <ParticipantCard
-                    name={p.userName}
-                    avatar={p.userAvatar}
-                    isSelf={false}
-                    speaking={false}
-                    muted={false}
-                  />
+                  <ParticipantCard participant={p} isSelf={false} />
                 </motion.div>
               ))}
             </AnimatePresence>
+
+            {others.length === 0 && (
+              <p className="text-sm" style={{ color: 'var(--text-3)' }}>No one else is here yet...</p>
+            )}
           </motion.div>
         )}
 
-        {/* Error */}
-        {error && (
-          <p className="text-sm text-center" style={{ color: 'var(--danger)' }}>{error}</p>
+        {error && <p className="text-sm text-center" style={{ color: 'var(--danger)' }}>{error}</p>}
+
+        {/* DEBUG PANEL — remove once voice is fixed */}
+        {debugLog.length > 0 && (
+          <div className="w-full max-w-2xl rounded-lg p-2 text-[10px] font-mono leading-relaxed" style={{ background: '#0d1117', border: '1px solid #30363d', maxHeight: 180, overflowY: 'auto' }}>
+            <p className="text-yellow-400 mb-1 font-bold">Voice Debug Log (userId {userId} | ch {channelId})</p>
+            {debugLog.map((line, i) => (
+              <p key={i} style={{ color: line.includes('ERROR') || line.includes('FAIL') || line.includes('error') ? '#f85149' : line.includes('OK') || line.includes('stream') || line.includes('succeeded') ? '#3fb950' : line.includes('Pusher') ? '#79c0ff' : '#8b949e' }}>
+                {line}
+              </p>
+            ))}
+          </div>
         )}
 
-        {/* Controls */}
         <div className="flex gap-3">
-          {!joined ? (
+          {!joined && !connecting ? (
             <motion.button
               onClick={join}
-              disabled={connecting}
               whileHover={{ scale: 1.04 }}
               whileTap={{ scale: 0.96 }}
-              className="flex items-center gap-2 px-6 py-3 rounded-xl font-semibold text-sm text-white disabled:opacity-70 transition-opacity"
+              className="flex items-center gap-2 px-6 py-3 rounded-xl font-semibold text-sm text-white"
               style={{ background: 'var(--online)', boxShadow: '0 4px 20px rgba(35,209,139,0.3)' }}
             >
               <Mic size={16} />
-              {connecting ? 'Connecting...' : 'Join Voice'}
+              Join Voice
             </motion.button>
-          ) : (
+          ) : joined ? (
             <>
               <motion.button
                 onClick={toggleMute}
                 whileHover={{ scale: 1.06 }}
                 whileTap={{ scale: 0.94 }}
                 className="w-12 h-12 rounded-xl flex items-center justify-center transition-colors"
+                title={muted ? 'Unmute' : 'Mute'}
                 style={{
                   background: muted ? 'rgba(240,71,71,0.2)' : 'var(--bg-elevated)',
                   color: muted ? 'var(--danger)' : 'var(--text-1)',
@@ -328,17 +437,32 @@ export default function VoiceChannel({ channelId, channelName, userId, userName 
               </motion.button>
 
               <motion.button
+                onClick={toggleDeafen}
+                whileHover={{ scale: 1.06 }}
+                whileTap={{ scale: 0.94 }}
+                className="w-12 h-12 rounded-xl flex items-center justify-center transition-colors"
+                title={deafened ? 'Undeafen' : 'Deafen'}
+                style={{
+                  background: deafened ? 'rgba(240,71,71,0.2)' : 'var(--bg-elevated)',
+                  color: deafened ? 'var(--danger)' : 'var(--text-1)',
+                  border: deafened ? '1px solid rgba(240,71,71,0.4)' : '1px solid var(--border)',
+                }}
+              >
+                {deafened ? <VolumeX size={18} /> : <Volume2 size={18} />}
+              </motion.button>
+
+              <motion.button
                 onClick={leave}
                 whileHover={{ scale: 1.06 }}
                 whileTap={{ scale: 0.94 }}
-                className="flex items-center gap-2 px-5 py-3 rounded-xl font-semibold text-sm text-white transition-colors"
+                className="flex items-center gap-2 px-5 py-3 rounded-xl font-semibold text-sm text-white"
                 style={{ background: 'var(--danger)' }}
               >
                 <PhoneOff size={16} />
                 Leave
               </motion.button>
             </>
-          )}
+          ) : null}
         </div>
 
         {joined && (
@@ -442,42 +566,39 @@ function ControlPanel({
   );
 }
 
-function ParticipantCard({
-  name, avatar, isSelf, speaking, muted,
-}: {
-  name: string;
-  avatar: string | null;
-  isSelf: boolean;
-  speaking: boolean;
-  muted: boolean;
-}) {
+function ParticipantCard({ participant, isSelf }: { participant: Participant; isSelf: boolean }) {
   return (
     <div className="flex flex-col items-center gap-2">
       <div className="relative">
-        <div
-          className={`w-16 h-16 rounded-2xl flex items-center justify-center text-white font-bold text-lg overflow-hidden ${speaking ? 'speaking' : ''}`}
+        <motion.div
+          animate={participant.isSpeaking ? { boxShadow: ['0 0 0 0 rgba(35,209,139,0.4)', '0 0 0 8px rgba(35,209,139,0)', '0 0 0 0 rgba(35,209,139,0)'] } : {}}
+          transition={{ duration: 1.2, repeat: Infinity }}
+          className="w-16 h-16 rounded-2xl flex items-center justify-center text-white font-bold text-lg overflow-hidden"
           style={{
             background: isSelf ? 'var(--accent)' : 'var(--bg-elevated)',
-            border: speaking ? '2px solid var(--online)' : '2px solid var(--border)',
+            border: participant.isSpeaking ? '2px solid var(--online)' : '2px solid var(--border)',
           }}
         >
-          {avatar ? (
-            <img src={avatar} alt={name} className="w-full h-full object-cover" />
+          {participant.userAvatar ? (
+            <img src={participant.userAvatar} alt={participant.userName} className="w-full h-full object-cover" />
           ) : (
-            name.slice(0, 2).toUpperCase()
+            participant.userName.slice(0, 2).toUpperCase()
           )}
-        </div>
-        {muted && (
-          <div
-            className="absolute -bottom-1 -right-1 w-5 h-5 rounded-full flex items-center justify-center"
-            style={{ background: 'var(--danger)', border: '2px solid var(--bg-chat)' }}
-          >
+        </motion.div>
+
+        {participant.isMuted && (
+          <div className="absolute -bottom-1 -right-1 w-5 h-5 rounded-full flex items-center justify-center" style={{ background: 'var(--danger)', border: '2px solid var(--bg-chat)' }}>
             <MicOff size={10} color="#fff" />
+          </div>
+        )}
+        {participant.isDeafened && !participant.isMuted && (
+          <div className="absolute -bottom-1 -right-1 w-5 h-5 rounded-full flex items-center justify-center" style={{ background: 'var(--danger)', border: '2px solid var(--bg-chat)' }}>
+            <VolumeX size={10} color="#fff" />
           </div>
         )}
       </div>
       <span className="text-xs font-medium" style={{ color: 'var(--text-2)' }}>
-        {name}{isSelf ? ' (you)' : ''}
+        {participant.userName}{isSelf ? ' (you)' : ''}
       </span>
     </div>
   );

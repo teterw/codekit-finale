@@ -40,16 +40,34 @@ export default function ProfileSettingsModal({ userId, onClose, onSaved }: Props
   const [saveError, setSaveError] = useState('');
   const [saved, setSaved] = useState(false);
   const [dirty, setDirty] = useState(false);
+  const [debugLog, setDebugLog] = useState<string[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  function dbg(msg: string) {
+    const line = `[${new Date().toISOString().slice(11, 23)}] ${msg}`;
+    console.log('[UT debug]', line);
+    setDebugLog(prev => [...prev.slice(-19), line]);
+  }
 
   const { startUpload, isUploading } = useUploadThing('avatarUploader', {
     headers: { 'x-user-id': String(userId) },
     onClientUploadComplete(res) {
-      const url = res?.[0]?.url;
+      dbg(`onClientUploadComplete — res length: ${res?.length ?? 'null'}`);
+      if (res?.[0]) {
+        dbg(`res[0] keys: ${Object.keys(res[0]).join(', ')}`);
+        dbg(`res[0].url: ${(res[0] as Record<string, unknown>).url}`);
+        dbg(`res[0].ufsUrl: ${res[0].ufsUrl}`);
+        dbg(`res[0].serverData: ${JSON.stringify(res[0].serverData)}`);
+      } else {
+        dbg('res[0] is null/undefined!');
+      }
+      const url = res?.[0]?.ufsUrl ?? res?.[0]?.serverData?.url;
+      dbg(`resolved url: ${url ?? 'NONE'}`);
       if (url) { setAvatarPreview(url); setDirty(true); }
       setUploadError('');
     },
     onUploadError(e) {
+      dbg(`onUploadError — code: ${e.code} | message: ${e.message}`);
       setUploadError(`Upload failed: ${e.message}`);
     },
   });
@@ -73,10 +91,17 @@ export default function ProfileSettingsModal({ userId, onClose, onSaved }: Props
     const file = e.target.files?.[0];
     if (!file) return;
     setUploadError('');
-    // Show local preview immediately
+    dbg(`file selected: ${file.name} | type: ${file.type} | size: ${file.size} bytes`);
+    dbg(`userId: ${userId}`);
     const localUrl = URL.createObjectURL(file);
     setAvatarPreview(localUrl);
-    await startUpload([file]);
+    dbg('calling startUpload…');
+    try {
+      const result = await startUpload([file]);
+      dbg(`startUpload resolved — result: ${JSON.stringify(result)}`);
+    } catch (err) {
+      dbg(`startUpload threw: ${err}`);
+    }
   }
 
   async function handleRemoveAvatar() {
@@ -225,6 +250,16 @@ export default function ProfileSettingsModal({ userId, onClose, onSaved }: Props
                 )}
               </div>
               {uploadError && <p className="text-xs" style={{ color: 'var(--danger)' }}>{uploadError}</p>}
+
+              {/* DEBUG PANEL — remove once upload is fixed */}
+              {debugLog.length > 0 && (
+                <div className="rounded-lg p-2 text-[10px] font-mono leading-relaxed overflow-x-auto" style={{ background: '#0d1117', border: '1px solid #30363d', color: '#8b949e', maxHeight: 160, overflowY: 'auto' }}>
+                  <p className="text-yellow-400 mb-1 font-bold">Upload Debug Log</p>
+                  {debugLog.map((line, i) => (
+                    <p key={i} style={{ color: line.includes('ERROR') || line.includes('FAIL') ? '#f85149' : line.includes('OK') || line.includes('resolved url') ? '#3fb950' : '#8b949e' }}>{line}</p>
+                  ))}
+                </div>
+              )}
 
               {/* Display Name */}
               <Field label="Display Name">
