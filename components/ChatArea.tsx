@@ -22,6 +22,7 @@ interface Props {
   channelName: string;
   userId: number;
   onOpenSearch?: () => void;
+  onViewProfile?: (userId: number) => void;
 }
 
 function isGrouped(messages: Message[], index: number): boolean {
@@ -53,7 +54,7 @@ function needsDateDivider(messages: Message[], index: number): string | null {
   return null;
 }
 
-export default function ChatArea({ channelId, channelName, userId, onOpenSearch }: Props) {
+export default function ChatArea({ channelId, channelName, userId, onOpenSearch, onViewProfile }: Props) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [nextCursor, setNextCursor] = useState<number | null>(null);
   const [loadingMore, setLoadingMore] = useState(false);
@@ -119,6 +120,13 @@ export default function ChatArea({ channelId, channelName, userId, onOpenSearch 
       channel.bind('message-deleted', ({ id }: { id: number }) => {
         setMessages(prev => prev.filter(m => m.id !== id));
       });
+
+      const userChannel = pusher.subscribe(`user-${userId}`);
+      userChannel.bind('profile-updated', (p: { id: number; name: string; avatar: string | null }) => {
+        setMessages(prev => prev.map(m =>
+          m.userId === p.id ? { ...m, userName: p.name, userAvatar: p.avatar } : m
+        ));
+      });
     } catch {
       // Pusher is optional; messages still load through the REST endpoints.
     }
@@ -126,6 +134,7 @@ export default function ChatArea({ channelId, channelName, userId, onOpenSearch 
     return () => {
       try {
         pusher?.unsubscribe(`channel-${channelId}`);
+        pusher?.unsubscribe(`user-${userId}`);
       } catch {
         // Ignore cleanup failures from a partially configured client.
       }
@@ -264,6 +273,7 @@ export default function ChatArea({ channelId, channelName, userId, onOpenSearch 
                 isGrouped={grouped}
                 onUpdated={updated => setMessages(prev => prev.map(m => m.id === updated.id ? updated : m))}
                 onDeleted={id => setMessages(prev => prev.filter(m => m.id !== id))}
+                onViewProfile={onViewProfile}
               />
             </div>
           );

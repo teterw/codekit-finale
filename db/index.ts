@@ -116,3 +116,24 @@ async function createSchema() {
 export function ensureSchema() {
   return Promise.resolve();
 }
+
+let _profileMigration: Promise<void> | null = null;
+
+export function ensureProfileColumns(): Promise<void> {
+  if (_profileMigration) return _profileMigration;
+  _profileMigration = (async () => {
+    try {
+      await db.execute(sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS username text`);
+      await db.execute(sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS bio text`);
+      await db.execute(sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS updated_at timestamp`);
+      await db.execute(
+        sql`CREATE UNIQUE INDEX IF NOT EXISTS users_username_unique ON users(username) WHERE username IS NOT NULL`,
+      );
+    } catch (e) {
+      console.error('[db] profile migration failed', e);
+      _profileMigration = null;
+      throw e;
+    }
+  })();
+  return _profileMigration;
+}
