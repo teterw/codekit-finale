@@ -1,6 +1,7 @@
 'use client';
-
 import { useState } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
+import { Pencil, Trash2, X, Check } from 'lucide-react';
 
 interface Message {
   id: number;
@@ -16,14 +17,15 @@ interface Props {
   message: Message;
   currentUserId: number;
   channelId: number;
+  isGrouped: boolean;
   onUpdated: (msg: Message) => void;
   onDeleted: (id: number) => void;
 }
 
-export default function MessageItem({ message, currentUserId, channelId, onUpdated, onDeleted }: Props) {
+export default function MessageItem({ message, currentUserId, channelId, isGrouped, onUpdated, onDeleted }: Props) {
   const [editing, setEditing] = useState(false);
   const [editContent, setEditContent] = useState(message.content);
-  const [hovering, setHovering] = useState(false);
+  const [saving, setSaving] = useState(false);
   const isOwn = message.userId === currentUserId;
 
   const time = new Date(message.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
@@ -31,7 +33,8 @@ export default function MessageItem({ message, currentUserId, channelId, onUpdat
 
   async function saveEdit() {
     const content = editContent.trim();
-    if (!content || content === message.content) { setEditing(false); return; }
+    if (!content || content === message.content || saving) { setEditing(false); return; }
+    setSaving(true);
     const res = await fetch(`/api/messages/${channelId}/${message.id}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json', 'x-user-id': String(currentUserId) },
@@ -41,6 +44,7 @@ export default function MessageItem({ message, currentUserId, channelId, onUpdat
       const data = await res.json();
       onUpdated({ ...message, content: data.message.content, updatedAt: data.message.updatedAt });
     }
+    setSaving(false);
     setEditing(false);
   }
 
@@ -54,63 +58,113 @@ export default function MessageItem({ message, currentUserId, channelId, onUpdat
   }
 
   return (
-    <div
-      className="flex items-start gap-3 px-4 py-1 hover:bg-[#32353b] group relative"
-      onMouseEnter={() => setHovering(true)}
-      onMouseLeave={() => setHovering(false)}
+    <motion.div
+      layout="position"
+      className="message-hover relative flex items-start gap-3 px-4 group"
+      style={{ paddingTop: isGrouped ? '2px' : '12px', paddingBottom: '2px' }}
     >
-      <div className="w-10 h-10 rounded-full bg-[#7289da] flex items-center justify-center text-white text-sm font-bold flex-shrink-0 mt-0.5">
-        {message.userAvatar ? (
-          <img src={message.userAvatar} alt={message.userName} className="w-full h-full rounded-full object-cover" />
+      {/* Avatar column */}
+      <div className="w-10 flex-shrink-0 flex justify-center">
+        {isGrouped ? (
+          <span
+            className="text-xs opacity-0 group-hover:opacity-100 transition-opacity select-none pt-0.5"
+            style={{ color: 'var(--text-3)', fontSize: '10px', lineHeight: '20px' }}
+          >
+            {time}
+          </span>
         ) : (
-          message.userName.slice(0, 2).toUpperCase()
+          <div
+            className="w-10 h-10 rounded-full flex items-center justify-center text-white text-xs font-bold flex-shrink-0 mt-0.5 overflow-hidden"
+            style={{ background: 'var(--accent)' }}
+          >
+            {message.userAvatar ? (
+              <img src={message.userAvatar} alt={message.userName} className="w-full h-full object-cover" />
+            ) : (
+              message.userName.slice(0, 2).toUpperCase()
+            )}
+          </div>
         )}
       </div>
 
+      {/* Content */}
       <div className="flex-1 min-w-0">
-        <div className="flex items-baseline gap-2">
-          <span className="text-white font-medium text-sm">{message.userName}</span>
-          <span className="text-[#72767d] text-xs">{time}</span>
-          {wasEdited && <span className="text-[#72767d] text-xs">(edited)</span>}
-        </div>
+        {!isGrouped && (
+          <div className="flex items-baseline gap-2 mb-0.5">
+            <span className="font-semibold text-sm" style={{ color: 'var(--text-1)' }}>
+              {message.userName}
+            </span>
+            <span className="text-xs" style={{ color: 'var(--text-3)' }}>{time}</span>
+            {wasEdited && (
+              <span className="text-xs" style={{ color: 'var(--text-3)' }}>(edited)</span>
+            )}
+          </div>
+        )}
 
         {editing ? (
           <div className="mt-1">
-            <input
+            <textarea
               autoFocus
               value={editContent}
               onChange={e => setEditContent(e.target.value)}
               onKeyDown={e => {
-                if (e.key === 'Enter') saveEdit();
-                if (e.key === 'Escape') setEditing(false);
+                if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); saveEdit(); }
+                if (e.key === 'Escape') { setEditing(false); setEditContent(message.content); }
               }}
-              className="w-full bg-[#40444b] text-[#dcddde] rounded px-3 py-1.5 text-sm outline-none focus:ring-2 focus:ring-[#7289da]"
+              rows={2}
+              className="w-full rounded-lg px-3 py-2 text-sm outline-none resize-none transition-shadow"
+              style={{
+                background: 'var(--bg-elevated)',
+                border: '1px solid var(--accent)',
+                color: 'var(--text-1)',
+                boxShadow: '0 0 0 3px var(--accent-dim)',
+              }}
             />
-            <p className="text-[#72767d] text-xs mt-1">Enter to save · Esc to cancel</p>
+            <div className="flex items-center gap-2 mt-1.5">
+              <p className="text-xs" style={{ color: 'var(--text-3)' }}>Enter to save · Esc to cancel</p>
+              <button onClick={() => { setEditing(false); setEditContent(message.content); }} className="p-1 rounded" style={{ color: 'var(--text-3)' }}>
+                <X size={12} />
+              </button>
+              <button onClick={saveEdit} disabled={saving} className="p-1 rounded" style={{ color: 'var(--online)' }}>
+                <Check size={12} />
+              </button>
+            </div>
           </div>
         ) : (
-          <p className="text-[#dcddde] text-sm leading-relaxed break-words">{message.content}</p>
+          <p className="text-sm leading-relaxed break-words" style={{ color: 'var(--text-1)' }}>
+            {message.content}
+            {isGrouped && wasEdited && (
+              <span className="ml-1.5 text-xs" style={{ color: 'var(--text-3)' }}>(edited)</span>
+            )}
+          </p>
         )}
       </div>
 
-      {isOwn && hovering && !editing && (
-        <div className="absolute right-4 top-1 flex gap-1 bg-[#2f3136] border border-[#202225] rounded shadow-lg px-1 py-0.5">
-          <button
-            onClick={() => { setEditing(true); setEditContent(message.content); }}
-            className="text-[#b9bbbe] hover:text-white text-xs px-2 py-1 rounded hover:bg-[#40444b]"
-            title="Edit"
+      {/* Action bar (hover reveal) */}
+      <AnimatePresence>
+        {isOwn && !editing && (
+          <motion.div
+            className="message-actions absolute right-4 -top-3 flex gap-0.5 rounded-lg overflow-hidden shadow-lg"
+            style={{ background: 'var(--bg-elevated)', border: '1px solid var(--border)' }}
           >
-            ✏️
-          </button>
-          <button
-            onClick={deleteMsg}
-            className="text-[#b9bbbe] hover:text-[#ed4245] text-xs px-2 py-1 rounded hover:bg-[#40444b]"
-            title="Delete"
-          >
-            🗑️
-          </button>
-        </div>
-      )}
-    </div>
+            <button
+              onClick={() => { setEditing(true); setEditContent(message.content); }}
+              className="flex items-center gap-1 px-2 py-1.5 text-xs transition-colors hover:bg-white/10"
+              style={{ color: 'var(--text-2)' }}
+              title="Edit"
+            >
+              <Pencil size={12} />
+            </button>
+            <button
+              onClick={deleteMsg}
+              className="flex items-center gap-1 px-2 py-1.5 text-xs transition-colors hover:bg-[rgba(240,71,71,0.15)]"
+              style={{ color: 'var(--text-2)' }}
+              title="Delete"
+            >
+              <Trash2 size={12} />
+            </button>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </motion.div>
   );
 }
