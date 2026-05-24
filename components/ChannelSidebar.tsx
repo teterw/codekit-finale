@@ -1,7 +1,21 @@
 'use client';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Hash, Volume2, UserPlus, Copy, Check, ChevronDown, LogOut } from 'lucide-react';
+import { Hash, Volume2, UserPlus, Copy, Check, ChevronDown, LogOut, Settings } from 'lucide-react';
+import { getPusherClient } from '@/lib/pusher-client';
+
+const STATUS_DOT: Record<string, string> = {
+  online: '#23d18b',
+  idle: '#faa61a',
+  dnd: '#f04747',
+  offline: '#636b75',
+};
+const STATUS_LABEL: Record<string, string> = {
+  online: 'Online',
+  idle: 'Idle',
+  dnd: 'Do Not Disturb',
+  offline: 'Invisible',
+};
 
 interface Channel { id: number; name: string; type: string; }
 interface Server { id: number; name: string; ownerId: number; }
@@ -12,18 +26,46 @@ interface Props {
   selectedChannelId: number | null;
   userId: number;
   userName: string;
+  userAvatar?: string | null;
+  userStatus?: string;
   onSelectChannel: (channel: Channel) => void;
   onCreateInvite: () => void;
   onLogout: () => void;
+  onOpenProfileSettings?: () => void;
+  onViewOwnProfile?: () => void;
 }
 
 export default function ChannelSidebar({
   server, channels, selectedChannelId, userId, userName,
-  onSelectChannel, onLogout,
+  userAvatar, userStatus,
+  onSelectChannel, onLogout, onOpenProfileSettings, onViewOwnProfile,
 }: Props) {
   const [inviteCode, setInviteCode] = useState('');
   const [copied, setCopied] = useState(false);
   const [showInvite, setShowInvite] = useState(false);
+  const [localName, setLocalName] = useState(userName);
+  const [localAvatar, setLocalAvatar] = useState(userAvatar ?? null);
+  const [localStatus, setLocalStatus] = useState(userStatus ?? 'online');
+
+  useEffect(() => { setLocalName(userName); }, [userName]);
+  useEffect(() => { setLocalAvatar(userAvatar ?? null); }, [userAvatar]);
+  useEffect(() => { setLocalStatus(userStatus ?? 'online'); }, [userStatus]);
+
+  useEffect(() => {
+    let pusher: ReturnType<typeof getPusherClient> | null = null;
+    try {
+      pusher = getPusherClient(userId);
+      const ch = pusher.subscribe(`user-${userId}`);
+      ch.bind('profile-updated', (p: { name: string; avatar: string | null; status: string }) => {
+        if (p.name) setLocalName(p.name);
+        setLocalAvatar(p.avatar ?? null);
+        if (p.status) setLocalStatus(p.status);
+      });
+    } catch { /* Pusher not configured */ }
+    return () => {
+      try { pusher?.unsubscribe(`user-${userId}`); } catch { /* ignore */ }
+    };
+  }, [userId]);
 
   const textChannels = channels.filter(c => c.type === 'text');
   const voiceChannels = channels.filter(c => c.type === 'voice');
@@ -151,19 +193,44 @@ export default function ChannelSidebar({
         className="flex items-center gap-2 px-2 py-2.5 flex-shrink-0"
         style={{ background: 'var(--bg-sidebar)', borderTop: '1px solid var(--border)' }}
       >
-        <div
-          className="w-8 h-8 rounded-full flex items-center justify-center text-white text-xs font-bold flex-shrink-0"
-          style={{ background: 'var(--accent)' }}
+        <button
+          onClick={onViewOwnProfile}
+          className="relative flex-shrink-0 rounded-full transition-opacity hover:opacity-80"
+          title="View profile"
         >
-          {userName.slice(0, 2).toUpperCase()}
-        </div>
+          {localAvatar ? (
+            <img
+              src={localAvatar}
+              alt={localName}
+              className="w-8 h-8 rounded-full object-cover"
+            />
+          ) : (
+            <div
+              className="w-8 h-8 rounded-full flex items-center justify-center text-white text-xs font-bold"
+              style={{ background: 'var(--accent)' }}
+            >
+              {localName.slice(0, 2).toUpperCase()}
+            </div>
+          )}
+          <div
+            className="absolute bottom-0 right-0 w-2.5 h-2.5 rounded-full border-2"
+            style={{ background: STATUS_DOT[localStatus] ?? STATUS_DOT.online, borderColor: 'var(--bg-sidebar)' }}
+          />
+        </button>
         <div className="flex-1 min-w-0">
-          <p className="text-xs font-semibold truncate" style={{ color: 'var(--text-1)' }}>{userName}</p>
-          <div className="flex items-center gap-1">
-            <div className="w-1.5 h-1.5 rounded-full" style={{ background: 'var(--online)' }} />
-            <p className="text-xs" style={{ color: 'var(--text-3)' }}>Online</p>
-          </div>
+          <p className="text-xs font-semibold truncate" style={{ color: 'var(--text-1)' }}>{localName}</p>
+          <p className="text-xs truncate" style={{ color: 'var(--text-3)' }}>
+            {STATUS_LABEL[localStatus] ?? 'Online'}
+          </p>
         </div>
+        <button
+          onClick={onOpenProfileSettings}
+          title="Profile settings"
+          className="p-1.5 rounded-md transition-colors hover:bg-white/10 flex-shrink-0"
+          style={{ color: 'var(--text-3)' }}
+        >
+          <Settings size={15} />
+        </button>
         <button
           onClick={onLogout}
           title="Log out"

@@ -21,6 +21,7 @@ interface Props {
   onUpdated: (msg: Message) => void;
   onDeleted: (id: number) => void;
   onOpenThread?: (msg: Message) => void;
+  onViewProfile?: (userId: number) => void;
 }
 
 export default function MessageItem({
@@ -31,6 +32,7 @@ export default function MessageItem({
   onUpdated,
   onDeleted,
   onOpenThread,
+  onViewProfile,
 }: Props) {
   const [editing, setEditing] = useState(false);
   const [editContent, setEditContent] = useState(message.content);
@@ -83,8 +85,9 @@ export default function MessageItem({
           </span>
         ) : (
           <div
-            className="w-10 h-10 rounded-full flex items-center justify-center text-white text-xs font-bold flex-shrink-0 mt-0.5 overflow-hidden"
+            className="w-10 h-10 rounded-full flex items-center justify-center text-white text-xs font-bold flex-shrink-0 mt-0.5 overflow-hidden cursor-pointer hover:ring-2 hover:ring-[var(--accent)] transition-shadow"
             style={{ background: 'var(--accent)' }}
+            onClick={() => onViewProfile?.(message.userId)}
           >
             {message.userAvatar ? (
               <img src={message.userAvatar} alt={message.userName} className="w-full h-full object-cover" />

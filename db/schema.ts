@@ -6,8 +6,11 @@ export const users = pgTable('users', {
   email: text('email').notNull(),
   password: text('password').notNull(),
   avatar: text('avatar'),
+  username: text('username'),
+  bio: text('bio'),
   status: text('status').notNull().default('offline'),
   createdAt: timestamp('created_at').notNull().defaultNow(),
+  updatedAt: timestamp('updated_at'),
 }, (t) => [
   uniqueIndex('users_email_unique').on(t.email),
 ]);

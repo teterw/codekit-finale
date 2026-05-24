@@ -11,6 +11,8 @@ import FeatureHub from './FeatureHub';
 import InviteModal from './InviteModal';
 import SearchModal from './SearchModal';
 import CreateServerModal from './CreateServerModal';
+import UserProfileModal from './profile/UserProfileModal';
+import ProfileSettingsModal from './profile/ProfileSettingsModal';
 import { fadeUp } from '@/lib/animations';
 
 interface Server { id: number; name: string; icon: string | null; ownerId: number; }
@@ -23,9 +25,13 @@ export default function MainApp() {
   const [selectedServer, setSelectedServer] = useState<Server | null>(null);
   const [channels, setChannels] = useState<Channel[]>([]);
   const [selectedChannel, setSelectedChannel] = useState<Channel | null>(null);
+  const [userAvatar, setUserAvatar] = useState<string | null>(null);
+  const [userStatus, setUserStatus] = useState('online');
   const [showInviteModal, setShowInviteModal] = useState(false);
   const [showSearchModal, setShowSearchModal] = useState(false);
   const [showCreateModal, setShowCreateModal] = useState(false);
+  const [profileUserId, setProfileUserId] = useState<number | null>(null);
+  const [showProfileSettings, setShowProfileSettings] = useState(false);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const [loading, setLoading] = useState(true);
 
@@ -67,6 +73,16 @@ export default function MainApp() {
   useEffect(() => {
     if (!userId) return;
     let cancelled = false;
+
+    fetch('/api/profile/me', { headers: { 'x-user-id': String(userId) } })
+      .then(r => r.json())
+      .then(d => {
+        if (cancelled) return;
+        if (d.user?.avatar !== undefined) setUserAvatar(d.user.avatar);
+        if (d.user?.status) setUserStatus(d.user.status);
+        if (d.user?.name) setUserName(d.user.name);
+      })
+      .catch(() => {});
 
     queueMicrotask(async () => {
       const list = await fetchServers(userId);
@@ -222,9 +238,13 @@ export default function MainApp() {
           selectedChannelId={selectedChannel?.id ?? null}
           userId={userId}
           userName={userName}
+          userAvatar={userAvatar}
+          userStatus={userStatus}
           onSelectChannel={ch => { setSelectedChannel(ch); }}
           onCreateInvite={() => {}}
           onLogout={handleLogout}
+          onOpenProfileSettings={() => setShowProfileSettings(true)}
+          onViewOwnProfile={() => setProfileUserId(userId)}
         />
       </div>
 
@@ -259,9 +279,13 @@ export default function MainApp() {
                 selectedChannelId={selectedChannel?.id ?? null}
                 userId={userId}
                 userName={userName}
+                userAvatar={userAvatar}
+                userStatus={userStatus}
                 onSelectChannel={ch => { setSelectedChannel(ch); setMobileSidebarOpen(false); }}
                 onCreateInvite={() => {}}
                 onLogout={handleLogout}
+                onOpenProfileSettings={() => { setShowProfileSettings(true); setMobileSidebarOpen(false); }}
+                onViewOwnProfile={() => { setProfileUserId(userId); setMobileSidebarOpen(false); }}
               />
             </motion.div>
           </>
@@ -338,6 +362,7 @@ export default function MainApp() {
                 userId={userId}
                 userName={userName}
                 onOpenSearch={() => setShowSearchModal(true)}
+                onViewProfile={setProfileUserId}
               />
             </motion.div>
           )}
@@ -376,6 +401,31 @@ export default function MainApp() {
             userId={userId}
             onJoined={handleJoined}
             onClose={() => setShowInviteModal(false)}
+          />
+        )}
+        {profileUserId !== null && (
+          <UserProfileModal
+            key={`profile-${profileUserId}`}
+            userId={profileUserId}
+            currentUserId={userId}
+            requestUserId={userId}
+            onClose={() => setProfileUserId(null)}
+            onEditProfile={() => {
+              setProfileUserId(null);
+              setShowProfileSettings(true);
+            }}
+          />
+        )}
+        {showProfileSettings && (
+          <ProfileSettingsModal
+            key="profile-settings"
+            userId={userId}
+            onClose={() => setShowProfileSettings(false)}
+            onSaved={(profile) => {
+              if (profile.name) setUserName(profile.name);
+              setUserAvatar(profile.avatar ?? null);
+              if (profile.status) setUserStatus(profile.status);
+            }}
           />
         )}
       </AnimatePresence>
