@@ -62,7 +62,7 @@ export default function ProfileSettingsPage() {
   const { startUpload, isUploading } = useUploadThing('avatarUploader', {
     headers: userId ? { 'x-user-id': String(userId) } : {},
     onClientUploadComplete(res) {
-      const url = res?.[0]?.url;
+      const url = res?.[0]?.ufsUrl ?? res?.[0]?.serverData?.url;
       if (url) { setAvatarPreview(url); setDirty(true); }
       setUploadError('');
     },

@@ -36,6 +36,13 @@ export default function VoiceChannel({ channelId, channelName, userId, userName 
   const [streaming, setStreaming] = useState(false);
   const [voiceEffect, setVoiceEffect] = useState('Clean');
   const [lastClip, setLastClip] = useState('');
+  const [debugLog, setDebugLog] = useState<string[]>([]);
+
+  function dbg(msg: string) {
+    const line = `[${new Date().toISOString().slice(11, 23)}] ${msg}`;
+    console.log('[Voice debug]', line);
+    setDebugLog(prev => [...prev.slice(-29), line]);
+  }
 
   const peerRef = useRef<import('peerjs').Peer | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -46,11 +53,13 @@ export default function VoiceChannel({ channelId, channelName, userId, userName 
   const myPeerIdRef = useRef<string>('');
 
   function playAudio(stream: MediaStream, peerId: string) {
+    dbg(`playAudio — peerId: ${peerId} | tracks: ${stream.getTracks().length} | deafened: ${deafened}`);
     let audio = audioRefs.current.get(peerId);
     if (!audio) {
       audio = new Audio();
       audio.autoplay = true;
       audioRefs.current.set(peerId, audio);
+      dbg(`playAudio — created new Audio element for ${peerId}`);
     }
     audio.srcObject = stream;
     audio.muted = deafened;
@@ -95,54 +104,86 @@ export default function VoiceChannel({ channelId, channelName, userId, userName 
   async function join() {
     setError('');
     setConnecting(true);
+    dbg(`join() — userId: ${userId} | channelId: ${channelId}`);
     try {
+      dbg('requesting microphone…');
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
       streamRef.current = stream;
+      dbg(`mic OK — tracks: ${stream.getAudioTracks().length} | track label: ${stream.getAudioTracks()[0]?.label ?? 'none'}`);
       setupVoiceActivity(stream);
 
+      dbg('creating PeerJS peer…');
       const { Peer } = await import('peerjs');
       const peer = new Peer();
       peerRef.current = peer;
 
       peer.on('open', async myPeerId => {
         myPeerIdRef.current = myPeerId;
+        dbg(`peer.on(open) — myPeerId: ${myPeerId}`);
 
+        dbg(`POST /api/voice/${channelId} with peerId: ${myPeerId}`);
         const res = await fetch(`/api/voice/${channelId}`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'x-user-id': String(userId) },
           body: JSON.stringify({ peerId: myPeerId }),
         });
+        dbg(`POST response status: ${res.status}`);
         const data = await res.json();
         const allParticipants: Participant[] = data.participants ?? [];
+        dbg(`participants from API: ${allParticipants.length} — ${JSON.stringify(allParticipants.map(p => ({ uid: p.userId, peer: p.peerId?.slice(0, 8) })))}`);
+
         const others = allParticipants.filter(p => p.userId !== userId);
+        dbg(`others to call: ${others.length}`);
         setParticipants(allParticipants);
         setJoined(true);
         setConnecting(false);
 
         for (const p of others) {
+          dbg(`calling peer ${p.peerId?.slice(0, 8)}… (userId ${p.userId})`);
           const call = peer.call(p.peerId, stream);
-          call?.on('stream', remote => playAudio(remote, p.peerId));
+          if (!call) {
+            dbg(`ERROR — peer.call returned null for peerId ${p.peerId?.slice(0, 8)}`);
+          } else {
+            call.on('stream', remote => {
+              dbg(`got remote stream from ${p.peerId?.slice(0, 8)} (userId ${p.userId})`);
+              playAudio(remote, p.peerId);
+            });
+            call.on('error', e => dbg(`call error to ${p.peerId?.slice(0, 8)}: ${e}`));
+            call.on('close', () => dbg(`call closed with ${p.peerId?.slice(0, 8)}`));
+          }
         }
 
         peer.on('call', call => {
+          dbg(`incoming call from peer ${call.peer?.slice(0, 8)}`);
           call.answer(stream);
-          call.on('stream', remote => playAudio(remote, call.peer));
+          dbg(`answered call from ${call.peer?.slice(0, 8)}`);
+          call.on('stream', remote => {
+            dbg(`got remote stream from incoming call peer ${call.peer?.slice(0, 8)}`);
+            playAudio(remote, call.peer);
+          });
+          call.on('error', e => dbg(`incoming call error from ${call.peer?.slice(0, 8)}: ${e}`));
+          call.on('close', () => dbg(`incoming call closed from ${call.peer?.slice(0, 8)}`));
         });
       });
 
+      peer.on('disconnected', () => dbg('peer DISCONNECTED from signaling server'));
+      peer.on('close', () => dbg('peer CLOSED'));
       peer.on('error', err => {
-        const msg = (err as Error).message ?? '';
+        const msg = (err as Error).message ?? String(err);
+        dbg(`peer ERROR: ${msg}`);
         if (!msg.includes('Could not connect') && !msg.includes('Lost connection')) {
           console.warn('PeerJS:', err);
         }
       });
-    } catch {
+    } catch (e) {
+      dbg(`join() FAILED: ${e}`);
       setError('Could not access microphone. Please allow microphone access and try again.');
       setConnecting(false);
     }
   }
 
   async function leave() {
+    dbg('leave() called');
     cancelAnimationFrame(animFrameRef.current);
     if (speakTimerRef.current) clearTimeout(speakTimerRef.current);
     streamRef.current?.getTracks().forEach(t => t.stop());
@@ -154,6 +195,7 @@ export default function VoiceChannel({ channelId, channelName, userId, userName 
       method: 'DELETE',
       headers: { 'x-user-id': String(userId) },
     }).catch(() => {});
+    dbg('leave() complete');
     setJoined(false);
     setParticipants([]);
     setSpeaking(false);
@@ -243,42 +285,46 @@ export default function VoiceChannel({ channelId, channelName, userId, userName 
     if (!joined) return;
     let pusher: ReturnType<typeof getPusherClient> | null = null;
     try {
+      dbg(`subscribing Pusher to voice-channel-${channelId}`);
       pusher = getPusherClient(userId);
       const ch = pusher.subscribe(`voice-channel-${channelId}`);
 
+      ch.bind('pusher:subscription_succeeded', () => dbg('Pusher subscription_succeeded'));
+      ch.bind('pusher:subscription_error', (e: unknown) => dbg(`Pusher subscription_error: ${JSON.stringify(e)}`));
+
       ch.bind('voice-user-joined', (p: Participant) => {
-        // The joining user already called us; just update the participant list.
-        // Calling back here would create a duplicate WebRTC connection and break audio.
+        dbg(`Pusher voice-user-joined — userId: ${p.userId} | peerId: ${p.peerId?.slice(0, 8)}`);
         setParticipants(prev => {
           const exists = prev.some(x => x.userId === p.userId);
+          dbg(`voice-user-joined — exists in list: ${exists} | list size before: ${prev.length}`);
           return exists ? prev.map(x => (x.userId === p.userId ? { ...x, ...p } : x)) : [...prev, p];
         });
       });
 
       ch.bind('voice-user-left', ({ userId: leftId }: { userId: number }) => {
+        dbg(`Pusher voice-user-left — userId: ${leftId}`);
         setParticipants(prev => {
           const leaving = prev.find(p => p.userId === leftId);
           if (leaving) {
             const audio = audioRefs.current.get(leaving.peerId);
-            if (audio) {
-              audio.srcObject = null;
-              audioRefs.current.delete(leaving.peerId);
-            }
+            if (audio) { audio.srcObject = null; audioRefs.current.delete(leaving.peerId); }
           }
           return prev.filter(p => p.userId !== leftId);
         });
       });
 
       ch.bind('voice-user-state-updated', (updated: Partial<Participant> & { userId: number }) => {
+        dbg(`Pusher voice-user-state-updated — userId: ${updated.userId}`);
         setParticipants(prev => prev.map(p => (p.userId === updated.userId ? { ...p, ...updated } : p)));
       });
-    } catch {
-      // Pusher is optional.
+    } catch (e) {
+      dbg(`Pusher setup ERROR: ${e}`);
     }
 
     return () => {
-      try { pusher?.unsubscribe(`voice-channel-${channelId}`); } catch { /* ignore */ }
+      try { pusher?.unsubscribe(`voice-channel-${channelId}`); dbg('Pusher unsubscribed'); } catch { /* ignore */ }
     };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [joined, channelId, userId]);
 
   useEffect(() => {
@@ -348,6 +394,18 @@ export default function VoiceChannel({ channelId, channelName, userId, userName 
         )}
 
         {error && <p className="text-sm text-center" style={{ color: 'var(--danger)' }}>{error}</p>}
+
+        {/* DEBUG PANEL — remove once voice is fixed */}
+        {debugLog.length > 0 && (
+          <div className="w-full max-w-2xl rounded-lg p-2 text-[10px] font-mono leading-relaxed" style={{ background: '#0d1117', border: '1px solid #30363d', maxHeight: 180, overflowY: 'auto' }}>
+            <p className="text-yellow-400 mb-1 font-bold">Voice Debug Log (userId {userId} | ch {channelId})</p>
+            {debugLog.map((line, i) => (
+              <p key={i} style={{ color: line.includes('ERROR') || line.includes('FAIL') || line.includes('error') ? '#f85149' : line.includes('OK') || line.includes('stream') || line.includes('succeeded') ? '#3fb950' : line.includes('Pusher') ? '#79c0ff' : '#8b949e' }}>
+                {line}
+              </p>
+            ))}
+          </div>
+        )}
 
         <div className="flex gap-3">
           {!joined && !connecting ? (
