@@ -1,5 +1,6 @@
 'use client';
 import { useEffect, useState, useCallback } from 'react';
+import { useRouter } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Menu, X, Zap } from 'lucide-react';
 import AuthForm from './AuthForm';
@@ -18,6 +19,7 @@ interface Server { id: number; name: string; icon: string | null; ownerId: numbe
 interface Channel { id: number; name: string; type: string; }
 
 export default function MainApp() {
+  const router = useRouter();
   const [userId, setUserId] = useState<number | null>(null);
   const [userName, setUserName] = useState('');
   const [servers, setServers] = useState<Server[]>([]);
@@ -100,6 +102,7 @@ export default function MainApp() {
   function handleAuth(uid: number, name: string) {
     setUserId(uid);
     setUserName(name);
+    router.push('/direct-messages');
   }
 
   function handleLogout() {
@@ -255,6 +258,7 @@ export default function MainApp() {
           servers={servers}
           selectedId={selectedServer?.id ?? null}
           onSelect={handleSelectServer}
+          onOpenDMs={() => router.push('/direct-messages')}
           onAddServer={() => setShowCreateModal(true)}
           onJoinServer={() => setShowInviteModal(true)}
         />
@@ -298,6 +302,7 @@ export default function MainApp() {
                 servers={servers}
                 selectedId={selectedServer?.id ?? null}
                 onSelect={handleSelectServer}
+                onOpenDMs={() => { router.push('/direct-messages'); setMobileSidebarOpen(false); }}
                 onAddServer={() => { setShowCreateModal(true); setMobileSidebarOpen(false); }}
                 onJoinServer={() => { setShowInviteModal(true); setMobileSidebarOpen(false); }}
               />
