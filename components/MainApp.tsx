@@ -279,6 +279,7 @@ export default function MainApp() {
           onServerUpdated={handleServerUpdated}
           onServerDeleted={handleServerDeleted}
           onLogout={handleLogout}
+          onChannelCreated={ch => setChannels(prev => [...prev, ch])}
         />
       </div>
 
@@ -321,6 +322,7 @@ export default function MainApp() {
                 onServerUpdated={handleServerUpdated}
                 onServerDeleted={handleServerDeleted}
                 onLogout={handleLogout}
+                onChannelCreated={ch => setChannels(prev => [...prev, ch])}
               />
             </motion.div>
           </>

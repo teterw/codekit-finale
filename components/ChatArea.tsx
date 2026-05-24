@@ -203,6 +203,17 @@ export default function ChatArea({ channelId, channelName, userId, userName, onO
     };
   }, []);
 
+  useEffect(() => {
+    const messageIds = messages.filter(message => message.id > 0).map(message => message.id);
+    if (!messageIds.length) return undefined;
+
+    const timer = window.setInterval(() => {
+      fetchReactions(messageIds);
+    }, 3000);
+
+    return () => window.clearInterval(timer);
+  }, [fetchReactions, messages]);
+
   function handleScroll() {
     const list = listRef.current;
     if (!list) return;
