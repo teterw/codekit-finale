@@ -1,9 +1,9 @@
 import { getServerSession } from 'next-auth';
 import { notFound } from 'next/navigation';
-import { authOptions } from '@/lib/auth';
+import { and, eq } from 'drizzle-orm';
 import { db } from '@/db';
 import { channels } from '@/db/schema';
-import { and, eq } from 'drizzle-orm';
+import { authOptions } from '@/lib/auth';
 import ChatArea from '@/components/ChatArea';
 
 export default async function ChannelPage({

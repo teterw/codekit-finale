@@ -1,10 +1,11 @@
 'use client';
-import { useEffect, useRef, useState, useCallback } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
-import { Hash, Search, Send, ArrowDown } from 'lucide-react';
-import MessageItem from './MessageItem';
-import { getPusherClient } from '@/lib/pusher-client';
+
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { AnimatePresence, motion } from 'framer-motion';
+import { ArrowDown, Hash, Search, Send } from 'lucide-react';
 import { fadeUp } from '@/lib/animations';
+import { getPusherClient } from '@/lib/pusher-client';
+import MessageItem from './MessageItem';
 
 interface Message {
   id: number;
@@ -35,16 +36,20 @@ function getDateLabel(date: Date): string {
   const today = new Date();
   const yesterday = new Date(today);
   yesterday.setDate(yesterday.getDate() - 1);
+
   if (date.toDateString() === today.toDateString()) return 'Today';
   if (date.toDateString() === yesterday.toDateString()) return 'Yesterday';
+
   return date.toLocaleDateString([], { month: 'long', day: 'numeric', year: 'numeric' });
 }
 
 function needsDateDivider(messages: Message[], index: number): string | null {
   const date = new Date(messages[index].createdAt);
   if (index === 0) return getDateLabel(date);
+
   const prevDate = new Date(messages[index - 1].createdAt);
   if (date.toDateString() !== prevDate.toDateString()) return getDateLabel(date);
+
   return null;
 }
 
@@ -65,8 +70,10 @@ export default function ChatArea({ channelId, channelName, userId, onOpenSearch 
       : `/api/messages/${channelId}`;
     const res = await fetch(url, { headers: { 'x-user-id': String(userId) } });
     if (!res.ok) return;
+
     const data = await res.json();
     const fetched: Message[] = [...data.messages].reverse();
+
     if (cursor) {
       setMessages(prev => [...fetched, ...prev]);
     } else {
@@ -74,6 +81,7 @@ export default function ChatArea({ channelId, channelName, userId, onOpenSearch 
       setNextCursor(data.nextCursor);
       setTimeout(() => bottomRef.current?.scrollIntoView({ behavior: 'instant' }), 50);
     }
+
     setNextCursor(data.nextCursor);
   }, [channelId, userId]);
 
@@ -86,6 +94,7 @@ export default function ChatArea({ channelId, channelName, userId, onOpenSearch 
 
   useEffect(() => {
     let pusher: ReturnType<typeof getPusherClient> | null = null;
+
     try {
       pusher = getPusherClient(userId);
       const channel = pusher.subscribe(`channel-${channelId}`);
@@ -95,6 +104,7 @@ export default function ChatArea({ channelId, channelName, userId, onOpenSearch 
           if (prev.some(m => m.id === msg.id)) return prev;
           return [...prev, msg];
         });
+
         const list = listRef.current;
         if (list) {
           const isNearBottom = list.scrollHeight - list.scrollTop - list.clientHeight < 120;
@@ -109,36 +119,49 @@ export default function ChatArea({ channelId, channelName, userId, onOpenSearch 
       channel.bind('message-deleted', ({ id }: { id: number }) => {
         setMessages(prev => prev.filter(m => m.id !== id));
       });
-    } catch { /* Pusher not configured */ }
+    } catch {
+      // Pusher is optional; messages still load through the REST endpoints.
+    }
 
     return () => {
-      try { pusher?.unsubscribe(`channel-${channelId}`); } catch { /* ignore */ }
+      try {
+        pusher?.unsubscribe(`channel-${channelId}`);
+      } catch {
+        // Ignore cleanup failures from a partially configured client.
+      }
     };
   }, [channelId, userId]);
 
   function handleScroll() {
     const list = listRef.current;
     if (!list) return;
+
     const distFromBottom = list.scrollHeight - list.scrollTop - list.clientHeight;
     setShowJumpToBottom(distFromBottom > 200);
   }
 
   async function loadMore() {
     if (!nextCursor || loadingMore) return;
+
     setLoadingMore(true);
     const list = listRef.current;
     const prevScrollHeight = list?.scrollHeight ?? 0;
+
     await fetchMessages(nextCursor);
     if (list) list.scrollTop = list.scrollHeight - prevScrollHeight;
+
     setLoadingMore(false);
   }
 
   async function sendMessage(e: React.FormEvent) {
     e.preventDefault();
+
     const content = input.trim();
     if (!content || sending) return;
+
     setSending(true);
     setInput('');
+
     try {
       await fetch(`/api/messages/${channelId}`, {
         method: 'POST',
@@ -152,7 +175,6 @@ export default function ChatArea({ channelId, channelName, userId, onOpenSearch 
 
   return (
     <div className="flex flex-col flex-1 min-w-0 min-h-0" style={{ background: 'var(--bg-chat)' }}>
-      {/* Header */}
       <div
         className="flex items-center justify-between px-4 py-3 flex-shrink-0"
         style={{ borderBottom: '1px solid var(--border)', background: 'var(--bg-chat)' }}
@@ -161,6 +183,7 @@ export default function ChatArea({ channelId, channelName, userId, onOpenSearch 
           <Hash size={18} style={{ color: 'var(--accent)' }} />
           <h3 className="font-semibold text-sm" style={{ color: 'var(--text-1)' }}>{channelName}</h3>
         </div>
+
         {onOpenSearch && (
           <button
             onClick={onOpenSearch}
@@ -173,7 +196,6 @@ export default function ChatArea({ channelId, channelName, userId, onOpenSearch 
         )}
       </div>
 
-      {/* Messages */}
       <div
         ref={listRef}
         onScroll={handleScroll}
@@ -187,7 +209,7 @@ export default function ChatArea({ channelId, channelName, userId, onOpenSearch 
               className="text-xs px-4 py-1.5 rounded-full transition-colors disabled:opacity-50"
               style={{ color: 'var(--accent)', background: 'var(--accent-dim)', border: '1px solid var(--accent-glow)' }}
             >
-              {loadingMore ? 'Loading…' : 'Load earlier messages'}
+              {loadingMore ? 'Loading...' : 'Load earlier messages'}
             </button>
           </div>
         )}
@@ -231,6 +253,7 @@ export default function ChatArea({ channelId, channelName, userId, onOpenSearch 
         {!initialLoading && messages.map((msg, i) => {
           const divider = needsDateDivider(messages, i);
           const grouped = isGrouped(messages, i);
+
           return (
             <div key={msg.id}>
               {divider && <DateDivider label={divider} />}
@@ -248,7 +271,6 @@ export default function ChatArea({ channelId, channelName, userId, onOpenSearch 
         <div ref={bottomRef} className="h-2" />
       </div>
 
-      {/* Jump to bottom */}
       <AnimatePresence>
         {showJumpToBottom && (
           <motion.button
@@ -264,7 +286,6 @@ export default function ChatArea({ channelId, channelName, userId, onOpenSearch 
         )}
       </AnimatePresence>
 
-      {/* Input */}
       <div className="px-4 pb-6 pt-2 flex-shrink-0">
         <form onSubmit={sendMessage}>
           <div
@@ -273,8 +294,12 @@ export default function ChatArea({ channelId, channelName, userId, onOpenSearch 
               background: 'var(--bg-elevated)',
               border: '1px solid var(--border)',
             }}
-            onFocusCapture={e => (e.currentTarget as HTMLElement).style.borderColor = 'rgba(124,107,255,0.3)'}
-            onBlurCapture={e => (e.currentTarget as HTMLElement).style.borderColor = 'var(--border)'}
+            onFocusCapture={e => {
+              (e.currentTarget as HTMLElement).style.borderColor = 'rgba(124,107,255,0.3)';
+            }}
+            onBlurCapture={e => {
+              (e.currentTarget as HTMLElement).style.borderColor = 'var(--border)';
+            }}
           >
             <input
               value={input}

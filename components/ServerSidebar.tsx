@@ -1,10 +1,18 @@
 'use client';
+
+import { useEffect, useState } from 'react';
+import { useParams, useRouter } from 'next/navigation';
 import { motion } from 'framer-motion';
-import { Plus, Link as LinkIcon } from 'lucide-react';
+import { Link as LinkIcon, Plus } from 'lucide-react';
 
-interface Server { id: number; name: string; icon: string | null; ownerId: number; }
+interface Server {
+  id: number;
+  name: string;
+  icon: string | null;
+  ownerId: number;
+}
 
-interface Props {
+interface ControlledProps {
   servers: Server[];
   selectedId: number | null;
   onSelect: (server: Server) => void;
@@ -12,11 +20,49 @@ interface Props {
   onJoinServer: () => void;
 }
 
+interface RoutedProps {
+  userId: number;
+}
+
+type Props = ControlledProps | RoutedProps;
+
+export default function ServerSidebar(props: Props) {
+  if ('userId' in props) {
+    return <RoutedServerSidebar userId={props.userId} />;
+  }
+
+  return <ServerSidebarView {...props} />;
+}
+
+function RoutedServerSidebar({ userId }: RoutedProps) {
+  const router = useRouter();
+  const params = useParams();
+  const selectedId = params?.serverId ? Number(params.serverId) : null;
+  const [servers, setServers] = useState<Server[]>([]);
+
+  useEffect(() => {
+    fetch('/api/servers', { headers: { 'x-user-id': String(userId) } })
+      .then(res => (res.ok ? res.json() : { servers: [] }))
+      .then(data => setServers(data.servers ?? []))
+      .catch(() => setServers([]));
+  }, [userId]);
+
+  return (
+    <ServerSidebarView
+      servers={servers}
+      selectedId={selectedId}
+      onSelect={server => router.push(`/channels/${server.id}`)}
+      onAddServer={() => router.push('/channels')}
+      onJoinServer={() => router.push('/channels')}
+    />
+  );
+}
+
 function ServerIcon({ server, selected, onClick }: { server: Server; selected: boolean; onClick: () => void }) {
   const initials = server.name.slice(0, 2).toUpperCase();
+
   return (
     <div className="relative group flex items-center w-full">
-      {/* Pill indicator */}
       <div
         className="absolute left-0 w-1 rounded-r-full transition-all duration-200"
         style={{
@@ -50,19 +96,31 @@ function ServerIcon({ server, selected, onClick }: { server: Server; selected: b
         )}
       </motion.button>
 
-      {/* Tooltip */}
       <div
         className="absolute left-16 px-2.5 py-1.5 rounded-md text-xs font-semibold whitespace-nowrap opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity duration-150 z-50 shadow-xl"
         style={{ background: '#111', color: 'var(--text-1)', border: '1px solid var(--border)' }}
       >
         {server.name}
-        <div className="absolute left-0 top-1/2 -translate-x-1.5 -translate-y-1/2 w-1.5 h-1.5 rotate-45" style={{ background: '#111', borderLeft: '1px solid var(--border)', borderBottom: '1px solid var(--border)' }} />
+        <div
+          className="absolute left-0 top-1/2 -translate-x-1.5 -translate-y-1/2 w-1.5 h-1.5 rotate-45"
+          style={{ background: '#111', borderLeft: '1px solid var(--border)', borderBottom: '1px solid var(--border)' }}
+        />
       </div>
     </div>
   );
 }
 
-function ActionIcon({ onClick, title, color, children }: { onClick: () => void; title: string; color: string; children: React.ReactNode }) {
+function ActionIcon({
+  onClick,
+  title,
+  color,
+  children,
+}: {
+  onClick: () => void;
+  title: string;
+  color: string;
+  children: React.ReactNode;
+}) {
   return (
     <div className="relative group flex items-center w-full">
       <motion.button
@@ -85,7 +143,7 @@ function ActionIcon({ onClick, title, color, children }: { onClick: () => void; 
   );
 }
 
-export default function ServerSidebar({ servers, selectedId, onSelect, onAddServer, onJoinServer }: Props) {
+function ServerSidebarView({ servers, selectedId, onSelect, onAddServer, onJoinServer }: ControlledProps) {
   return (
     <div
       className="flex flex-col items-center gap-2 py-3 w-[72px] min-w-[72px] overflow-y-auto no-scrollbar"
