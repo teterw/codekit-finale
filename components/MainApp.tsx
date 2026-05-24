@@ -294,6 +294,11 @@ export default function MainApp() {
           onServerDeleted={handleServerDeleted}
           onLogout={handleLogout}
           onChannelCreated={ch => setChannels(prev => [...prev, ch])}
+          onChannelRenamed={ch => setChannels(prev => prev.map(c => c.id === ch.id ? ch : c))}
+          onChannelDeleted={id => {
+            setChannels(prev => prev.filter(c => c.id !== id));
+            if (selectedChannel?.id === id) setSelectedChannel(null);
+          }}
         />
       </div>
 
@@ -337,6 +342,11 @@ export default function MainApp() {
                 onServerDeleted={handleServerDeleted}
                 onLogout={handleLogout}
                 onChannelCreated={ch => setChannels(prev => [...prev, ch])}
+                onChannelRenamed={ch => setChannels(prev => prev.map(c => c.id === ch.id ? ch : c))}
+                onChannelDeleted={id => {
+                  setChannels(prev => prev.filter(c => c.id !== id));
+                  if (selectedChannel?.id === id) setSelectedChannel(null);
+                }}
               />
             </motion.div>
           </>
