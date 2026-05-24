@@ -40,6 +40,8 @@ export default function MainApp() {
   useEffect(() => {
     let cancelled = false;
 
+    router.prefetch('/direct-messages');
+
     queueMicrotask(() => {
       if (cancelled) return;
       const id = localStorage.getItem('userId');
@@ -51,7 +53,7 @@ export default function MainApp() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [router]);
 
   const fetchServers = useCallback(async (uid: number) => {
     const res = await fetch('/api/servers', { headers: { 'x-user-id': String(uid) } });

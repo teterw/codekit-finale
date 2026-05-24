@@ -150,6 +150,8 @@ export default function DirectMessagesPage({ userId }: { userId: number }) {
   }, [userId]);
 
   useEffect(() => {
+    router.prefetch('/');
+
     fetch('/api/servers', { headers: { 'x-user-id': String(userId) } })
       .then((res) => (res.ok ? res.json() : { servers: [] }))
       .then((data) => setServers(data.servers ?? []))
@@ -162,7 +164,7 @@ export default function DirectMessagesPage({ userId }: { userId: number }) {
 
     refreshConversations();
     refreshFriends();
-  }, [userId, refreshConversations, refreshFriends]);
+  }, [userId, router, refreshConversations, refreshFriends]);
 
   const openDm = useCallback(
     async (targetUserId: number) => {

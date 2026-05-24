@@ -87,6 +87,7 @@ export default function ChannelList({ userId }: { userId: number }) {
                   fontWeight: channelId === ch.id ? 600 : 400,
                 }}
                 onMouseEnter={e => {
+                  router.prefetch(`/channels/${serverId}/${ch.id}`);
                   if (channelId !== ch.id)
                     (e.currentTarget as HTMLButtonElement).style.background =
                       'rgba(255,255,255,0.05)';
