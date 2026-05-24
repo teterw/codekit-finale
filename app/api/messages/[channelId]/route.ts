@@ -9,12 +9,16 @@ export async function GET(request: Request, { params }: { params: Promise<{ chan
     const userId = getUserId(request);
     if (!userId) return errorResponse('Missing x-user-id header', 401);
 
-    const { channelId: channelIdStr } = await params;
-    const channelId = Number(channelIdStr);
-    if (Number.isNaN(channelId)) return errorResponse('Invalid channel id', 400);
+    const { channelId } = await params;
+    const channelIdNumber = Number(channelId);
+    if (Number.isNaN(channelIdNumber)) {
+      return errorResponse('Invalid channel id', 400);
+    }
 
-    const [channel] = await db.select().from(channels).where(eq(channels.id, channelId)).limit(1);
-    if (!channel) return errorResponse('Channel not found', 404);
+    const [channel] = await db.select().from(channels).where(eq(channels.id, channelIdNumber)).limit(1);
+    if (!channel) {
+      return errorResponse('Channel not found', 404);
+    }
 
     const membership = await db
       .select()
@@ -25,8 +29,11 @@ export async function GET(request: Request, { params }: { params: Promise<{ chan
 
     const url = new URL(request.url);
     const cursor = url.searchParams.get('cursor');
+    const conditions = cursor
+      ? and(eq(messages.channelId, channelIdNumber), lt(messages.id, Number(cursor)))
+      : eq(messages.channelId, channelIdNumber);
 
-    let query = db
+    const rows = await db
       .select({
         id: messages.id,
         content: messages.content,
@@ -38,16 +45,11 @@ export async function GET(request: Request, { params }: { params: Promise<{ chan
       })
       .from(messages)
       .innerJoin(users, eq(messages.userId, users.id))
-      .where(eq(messages.channelId, channelId))
-      .$dynamic();
+      .where(conditions)
+      .orderBy(desc(messages.id))
+      .limit(30);
 
-    if (cursor) {
-      query = query.where(and(eq(messages.channelId, channelId), lt(messages.id, Number(cursor))));
-    }
-
-    const rows = await query.orderBy(desc(messages.id)).limit(30);
     const nextCursor = rows.length > 0 ? rows[rows.length - 1].id : null;
-
     return jsonResponse({ messages: rows, nextCursor });
   } catch {
     return errorResponse('Unable to fetch messages', 500);
@@ -59,15 +61,15 @@ export async function POST(request: Request, { params }: { params: Promise<{ cha
     const userId = getUserId(request);
     if (!userId) return errorResponse('Missing x-user-id header', 401);
 
-    const { channelId: channelIdStr } = await params;
-    const channelId = Number(channelIdStr);
-    if (Number.isNaN(channelId)) return errorResponse('Invalid channel id', 400);
+    const { channelId } = await params;
+    const channelIdNumber = Number(channelId);
+    if (Number.isNaN(channelIdNumber)) return errorResponse('Invalid channel id', 400);
 
     const body = (await request.json()) as { content?: string };
     const content = body.content?.trim();
     if (!content) return errorResponse('Message content is required', 400);
 
-    const [channel] = await db.select().from(channels).where(eq(channels.id, channelId)).limit(1);
+    const [channel] = await db.select().from(channels).where(eq(channels.id, channelIdNumber)).limit(1);
     if (!channel) return errorResponse('Channel not found', 404);
 
     const membership = await db
@@ -83,12 +85,12 @@ export async function POST(request: Request, { params }: { params: Promise<{ cha
       .where(eq(users.id, userId))
       .limit(1);
 
-    const [created] = await db.insert(messages).values({ channelId, userId, content }).returning();
+    const [created] = await db.insert(messages).values({ channelId: channelIdNumber, userId, content }).returning();
 
     const fullMessage = { ...created, userName: sender?.name ?? 'Unknown', userAvatar: sender?.avatar ?? null };
 
     try {
-      await getPusherServer().trigger(`channel-${channelId}`, 'new-message', fullMessage);
+      await getPusherServer().trigger(`channel-${channelIdNumber}`, 'new-message', fullMessage);
     } catch {
       // Pusher not configured — message saved, just not pushed live
     }
