@@ -1,8 +1,8 @@
 'use client';
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { AnimatePresence, motion } from 'framer-motion';
-import { Check, Copy, Edit2, Hash, LogOut, Settings, UserPlus, Volume2 } from 'lucide-react';
+import { Check, Copy, Edit2, Hash, LogOut, MicOff, Settings, UserPlus, Volume2 } from 'lucide-react';
 import { getPusherClient } from '@/lib/pusher-client';
 import EditServerModal from './EditServerModal';
 
@@ -21,6 +21,13 @@ const STATUS_LABEL: Record<string, string> = {
 
 interface Channel { id: number; name: string; type: string; }
 interface Server { id: number; name: string; icon: string | null; ownerId: number; }
+interface VoiceParticipantEntry {
+  userId: number;
+  userName: string;
+  userAvatar: string | null;
+  isMuted: boolean;
+  isSpeaking: boolean;
+}
 
 interface Props {
   server: Server | null;
@@ -85,8 +92,55 @@ export default function ChannelSidebar({
     };
   }, [userId]);
 
-  const textChannels = channels.filter(c => c.type === 'text');
-  const voiceChannels = channels.filter(c => c.type === 'voice');
+  const textChannels = useMemo(() => channels.filter(c => c.type === 'text'), [channels]);
+  const voiceChannels = useMemo(() => channels.filter(c => c.type === 'voice'), [channels]);
+  const [voiceParticipants, setVoiceParticipants] = useState<Record<number, VoiceParticipantEntry[]>>({});
+
+  useEffect(() => {
+    if (voiceChannels.length === 0) return;
+    let cancelled = false;
+    Promise.all(voiceChannels.map(async ch => {
+      try {
+        const res = await fetch(`/api/voice/${ch.id}`);
+        if (res.ok) return { id: ch.id, data: (await res.json()).participants ?? [] };
+      } catch { /* ignore */ }
+      return { id: ch.id, data: [] };
+    })).then(results => {
+      if (cancelled) return;
+      const map: Record<number, VoiceParticipantEntry[]> = {};
+      results.forEach(r => { map[r.id] = r.data; });
+      setVoiceParticipants(map);
+    });
+    return () => { cancelled = true; };
+  }, [voiceChannels]);
+
+  useEffect(() => {
+    if (voiceChannels.length === 0) return;
+    let pusher: ReturnType<typeof getPusherClient> | null = null;
+    try {
+      pusher = getPusherClient(userId);
+      for (const ch of voiceChannels) {
+        const pchan = pusher.subscribe(`voice-channel-${ch.id}`);
+        const chId = ch.id;
+        pchan.bind('voice-user-joined', (p: VoiceParticipantEntry) => {
+          setVoiceParticipants(prev => {
+            const existing = prev[chId] ?? [];
+            const exists = existing.some(x => x.userId === p.userId);
+            return { ...prev, [chId]: exists ? existing.map(x => x.userId === p.userId ? { ...x, ...p } : x) : [...existing, p] };
+          });
+        });
+        pchan.bind('voice-user-left', ({ userId: leftId }: { userId: number }) => {
+          setVoiceParticipants(prev => ({ ...prev, [chId]: (prev[chId] ?? []).filter(p => p.userId !== leftId) }));
+        });
+        pchan.bind('voice-user-state-updated', (updated: Partial<VoiceParticipantEntry> & { userId: number }) => {
+          setVoiceParticipants(prev => ({ ...prev, [chId]: (prev[chId] ?? []).map(p => p.userId === updated.userId ? { ...p, ...updated } : p) }));
+        });
+      }
+    } catch { /* Pusher optional */ }
+    return () => {
+      try { voiceChannels.forEach(ch => pusher?.unsubscribe(`voice-channel-${ch.id}`)); } catch { /* ignore */ }
+    };
+  }, [voiceChannels, userId]);
 
   async function generateInvite() {
     if (!server) return;
@@ -157,7 +211,34 @@ export default function ChannelSidebar({
         {voiceChannels.length > 0 && (
           <ChannelGroup label="Voice Channels">
             {voiceChannels.map(ch => (
-              <ChannelRow key={ch.id} channel={ch} selected={ch.id === selectedChannelId} onClick={() => onSelectChannel(ch)} icon={<Volume2 size={15} />} />
+              <div key={ch.id}>
+                <ChannelRow channel={ch} selected={ch.id === selectedChannelId} onClick={() => onSelectChannel(ch)} icon={<Volume2 size={15} />} />
+                {(voiceParticipants[ch.id] ?? []).map(p => (
+                  <div key={p.userId} className="flex items-center gap-1.5 pl-7 pr-2 py-0.5 rounded-md select-none">
+                    <div className="relative flex-shrink-0 w-4 h-4">
+                      {p.userAvatar ? (
+                        <img
+                          src={p.userAvatar}
+                          alt={p.userName}
+                          className="w-4 h-4 rounded-full object-cover"
+                          style={{ outline: p.isSpeaking ? '1.5px solid var(--online)' : '1.5px solid transparent', outlineOffset: '1px' }}
+                        />
+                      ) : (
+                        <div
+                          className="w-4 h-4 rounded-full flex items-center justify-center text-white font-bold"
+                          style={{ fontSize: 8, background: p.userId === userId ? 'var(--accent)' : 'var(--bg-elevated)', outline: p.isSpeaking ? '1.5px solid var(--online)' : '1.5px solid transparent', outlineOffset: '1px' }}
+                        >
+                          {p.userName.slice(0, 2).toUpperCase()}
+                        </div>
+                      )}
+                    </div>
+                    <span className="text-xs truncate flex-1" style={{ color: p.userId === userId ? 'var(--text-1)' : 'var(--text-3)' }}>
+                      {p.userName}{p.userId === userId ? ' (you)' : ''}
+                    </span>
+                    {p.isMuted && <MicOff size={9} style={{ color: 'var(--danger)', flexShrink: 0 }} />}
+                  </div>
+                ))}
+              </div>
             ))}
           </ChannelGroup>
         )}

@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(Get-ChildItem -Path \"c:\\\\Users\\\\tetee\\\\Documents\\\\GitHub\\\\codekit-finale\\\\codekit-finale\" -Directory)",
+      "Bash(Select-Object Name)"
+    ]
+  }
+}
