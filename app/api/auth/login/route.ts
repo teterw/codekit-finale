@@ -24,7 +24,9 @@ export async function POST(request: Request) {
     }
 
     return jsonResponse({ user: { id: user.id, name: user.name, email: user.email, avatar: user.avatar } });
-  } catch {
-    return errorResponse('Unable to login', 500);
+  } catch (error) {
+    console.error('[api/auth/login] error', error);
+    const message = error instanceof Error ? error.message : String(error);
+    return errorResponse(`Unable to login: ${message}`, 500);
   }
 }

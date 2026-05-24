@@ -49,6 +49,8 @@ export async function POST(request: Request) {
       },
     });
   } catch (error) {
-    return errorResponse('Unable to sign in with Google', 500);
+    console.error('[api/auth/google] error', error);
+    const message = error instanceof Error ? error.message : String(error);
+    return errorResponse(`Unable to sign in with Google: ${message}`, 500);
   }
 }

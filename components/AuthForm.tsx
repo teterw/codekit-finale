@@ -40,9 +40,12 @@ export default function AuthForm({ onAuth }: Props) {
   const [loading, setLoading] = useState(false);
   const [googleLoading, setGoogleLoading] = useState(false);
   const buttonRef = useRef<HTMLDivElement | null>(null);
+  const debug = true;
 
   const handleGoogleResponse = useCallback(async (response: { credential?: string }) => {
+    if (debug) console.debug('[AuthForm] Google response callback', response);
     if (!response?.credential) {
+      console.error('[AuthForm] Google response missing credential', response);
       setError('Google did not return a credential.');
       return;
     }
@@ -55,6 +58,12 @@ export default function AuthForm({ onAuth }: Props) {
 
     try {
       setGoogleLoading(true);
+      if (debug) console.debug('[AuthForm] Sending /api/auth/google request', {
+        email: profile.email,
+        name: profile.name,
+        avatar: profile.picture,
+      });
+
       const res = await fetch('/api/auth/google', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -64,15 +73,23 @@ export default function AuthForm({ onAuth }: Props) {
           avatar: profile.picture,
         }),
       });
-      const data = await res.json();
+      const data = await res.json().catch((parseError) => {
+        console.error('[AuthForm] Failed to parse /api/auth/google response', parseError);
+        return null;
+      });
+
       if (!res.ok) {
-        setError(data.error ?? 'Google sign-in failed');
+        console.error('[AuthForm] /api/auth/google returned error', res.status, data);
+        setError(data?.error ?? `Google sign-in failed (${res.status})`);
         return;
       }
+
+      if (debug) console.debug('[AuthForm] /api/auth/google successful', data);
       localStorage.setItem('userId', String(data.user.id));
       localStorage.setItem('userName', data.user.name);
       onAuth(data.user.id, data.user.name);
-    } catch {
+    } catch (error) {
+      console.error('[AuthForm] Google sign-in network error', error);
       setError('Google sign-in network error. Please try again.');
     } finally {
       setGoogleLoading(false);
@@ -85,11 +102,24 @@ export default function AuthForm({ onAuth }: Props) {
     window.onGoogleCredential = handleGoogleResponse;
 
     const initializeGoogle = () => {
-      if (!window.google?.accounts?.id || !buttonRef.current) return;
+      if (!window.google?.accounts?.id) {
+        console.error('[AuthForm] Google Identity Services loaded but google.accounts.id is missing');
+        setError('Google sign-in is unavailable. Please try again or disable ad blockers.');
+        return;
+      }
 
+      if (!buttonRef.current) {
+        console.error('[AuthForm] Google button ref is not mounted');
+        return;
+      }
+
+      console.debug('[AuthForm] Initializing Google Identity Services');
       window.google.accounts.id.initialize({
         client_id: GOOGLE_CLIENT_ID,
         callback: window.onGoogleCredential,
+        ux_mode: 'popup',
+        auto_select: false,
+        cancel_on_tap_outside: true,
       });
 
       window.google.accounts.id.renderButton(buttonRef.current, {
@@ -104,12 +134,19 @@ export default function AuthForm({ onAuth }: Props) {
       return;
     }
 
+    console.debug('[AuthForm] Loading Google Sign-In script');
     const script = document.createElement('script');
     script.src = 'https://accounts.google.com/gsi/client';
     script.async = true;
     script.defer = true;
-    script.onload = initializeGoogle;
-    script.onerror = () => setError('Unable to load Google Sign-In script.');
+    script.onload = () => {
+      console.debug('[AuthForm] Google Sign-In script loaded');
+      initializeGoogle();
+    };
+    script.onerror = () => {
+      console.error('[AuthForm] Failed to load Google Sign-In script');
+      setError('Unable to load Google Sign-In script. Disable ad blockers and try again.');
+    };
     document.body.appendChild(script);
 
     return () => {
@@ -124,30 +161,35 @@ export default function AuthForm({ onAuth }: Props) {
     setLoading(true);
 
     try {
-      if (mode === 'login') {
-        const res = await fetch('/api/auth/login', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ email, password }),
-        });
-        const data = await res.json();
-        if (!res.ok) { setError(data.error ?? 'Login failed'); return; }
-        localStorage.setItem('userId', String(data.user.id));
-        localStorage.setItem('userName', data.user.name);
-        onAuth(data.user.id, data.user.name);
-      } else {
-        const res = await fetch('/api/auth/register', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ name, email, password }),
-        });
-        const data = await res.json();
-        if (!res.ok) { setError(data.error ?? 'Registration failed'); return; }
-        localStorage.setItem('userId', String(data.user.id));
-        localStorage.setItem('userName', data.user.name);
-        onAuth(data.user.id, data.user.name);
+      const payload = mode === 'login'
+        ? { email, password }
+        : { name, email, password };
+      const route = mode === 'login' ? '/api/auth/login' : '/api/auth/register';
+
+      console.debug('[AuthForm] Submitting auth form', { mode, route, payload });
+      const res = await fetch(route, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+
+      const data = await res.json().catch((parseError) => {
+        console.error(`[AuthForm] Failed to parse ${route} response`, parseError);
+        return null;
+      });
+
+      if (!res.ok) {
+        console.error(`[AuthForm] ${route} returned error`, res.status, data);
+        setError(data?.error ?? `Request failed (${res.status})`);
+        return;
       }
-    } catch {
+
+      if (debug) console.debug('[AuthForm] Auth success', data);
+      localStorage.setItem('userId', String(data.user.id));
+      localStorage.setItem('userName', data.user.name);
+      onAuth(data.user.id, data.user.name);
+    } catch (error) {
+      console.error('[AuthForm] Auth network error', error);
       setError('Network error. Please try again.');
     } finally {
       setLoading(false);

@@ -48,6 +48,8 @@ export async function POST(request: Request) {
       },
     });
   } catch (error) {
-    return errorResponse('Registration failed', 500);
+    console.error('[api/auth/register] error', error);
+    const message = error instanceof Error ? error.message : String(error);
+    return errorResponse(`Registration failed: ${message}`, 500);
   }
 }
