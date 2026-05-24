@@ -55,7 +55,7 @@ export default function ProfileSettingsModal({ userId, onClose, onSaved }: Props
       dbg(`onClientUploadComplete — res length: ${res?.length ?? 'null'}`);
       if (res?.[0]) {
         dbg(`res[0] keys: ${Object.keys(res[0]).join(', ')}`);
-        dbg(`res[0].url: ${(res[0] as Record<string, unknown>).url}`);
+        dbg(`res[0].url: ${(res[0] as unknown as Record<string, unknown>).url}`);
         dbg(`res[0].ufsUrl: ${res[0].ufsUrl}`);
         dbg(`res[0].serverData: ${JSON.stringify(res[0].serverData)}`);
       } else {
