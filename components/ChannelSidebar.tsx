@@ -1,7 +1,7 @@
 'use client';
 import { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Hash, Volume2, UserPlus, Copy, Check, ChevronDown, LogOut, Edit2 } from 'lucide-react';
+import { Hash, Volume2, UserPlus, Copy, Check, ChevronDown, LogOut, Settings, Edit2 } from 'lucide-react';
 import EditServerModal from './EditServerModal';
 
 interface Channel { id: number; name: string; type: string; }
@@ -17,14 +17,17 @@ interface Props {
   userStatus?: string;
   onSelectChannel: (channel: Channel) => void;
   onCreateInvite: () => void;
+  onOpenProfileSettings: () => void;
+  onViewOwnProfile: () => void;
   onLogout: () => void;
   onServerUpdated: (server: Server) => void;
   onServerDeleted: (serverId: number) => void;
 }
 
 export default function ChannelSidebar({
-  server, channels, selectedChannelId, userId, userName,
-  onSelectChannel, onCreateInvite, onLogout, onServerUpdated, onServerDeleted,
+  server, channels, selectedChannelId, userId, userName, userAvatar, userStatus,
+  onSelectChannel, onCreateInvite, onOpenProfileSettings, onViewOwnProfile, onLogout,
+  onServerUpdated, onServerDeleted,
 }: Props) {
   const [inviteCode, setInviteCode] = useState('');
   const [copied, setCopied] = useState(false);
@@ -67,6 +70,21 @@ export default function ChannelSidebar({
 
   const canManageServer = server.ownerId === userId;
   const serverInitials = server.name.slice(0, 2).toUpperCase();
+  const localAvatar = userAvatar ?? null;
+  const localName = userName;
+  const localStatus = userStatus ?? 'online';
+  const STATUS_DOT: Record<string, string> = {
+    online: '#23d18b',
+    idle: '#faa61a',
+    dnd: '#f04747',
+    offline: '#636b75',
+  };
+  const STATUS_LABEL: Record<string, string> = {
+    online: 'Online',
+    idle: 'Idle',
+    dnd: 'Do Not Disturb',
+    offline: 'Offline',
+  };
 
   return (
     <div className="w-60 min-w-[240px] flex flex-col" style={{ background: 'var(--bg-channels)' }}>
