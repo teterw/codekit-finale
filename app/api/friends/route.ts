@@ -3,6 +3,17 @@ import { friendships, users } from '@/db/schema';
 import { and, eq, or, sql } from 'drizzle-orm';
 import { errorResponse, getUserId, jsonResponse } from '@/lib/api-helpers';
 
+// Postgres "undefined_table" — the friendships table hasn't been created yet.
+// The app DB role lacks CREATE on schema public, so it must be added manually
+// in the Neon SQL editor (see the CREATE TABLE in ensureFriendsTable).
+function isMissingTable(e: unknown): boolean {
+  if (typeof e !== 'object' || e === null) return false;
+  const err = e as { code?: string; cause?: { code?: string } };
+  return err.code === '42P01' || err.cause?.code === '42P01';
+}
+
+const SETUP_HINT = 'Friends are not set up yet — the friendships table is missing in the database.';
+
 let _friendsTable: Promise<void> | null = null;
 
 export function ensureFriendsTable(): Promise<void> {
@@ -71,7 +82,8 @@ export async function GET(request: Request) {
       .map(decorate);
 
     return jsonResponse({ friends, incoming, outgoing });
-  } catch {
+  } catch (e) {
+    if (isMissingTable(e)) return jsonResponse({ friends: [], incoming: [], outgoing: [] });
     return errorResponse('Unable to fetch friends', 500);
   }
 }
@@ -130,7 +142,8 @@ export async function POST(request: Request) {
       .returning();
 
     return jsonResponse({ status: 'pending', friendshipId: created.id }, 201);
-  } catch {
+  } catch (e) {
+    if (isMissingTable(e)) return errorResponse(SETUP_HINT, 503);
     return errorResponse('Unable to send friend request', 500);
   }
 }
