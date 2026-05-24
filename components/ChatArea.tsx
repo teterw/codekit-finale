@@ -83,6 +83,7 @@ export default function ChatArea({ channelId, channelName, userId, userName, onO
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const typingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isTypingRef = useRef(false);
+  const messagesRef = useRef<Message[]>([]);
 
   const fetchReactions = useCallback(async (messageIds: number[]) => {
     if (!messageIds.length) return;
@@ -97,6 +98,18 @@ export default function ChatArea({ channelId, channelName, userId, userName, onO
       // Reactions are non-critical.
     }
   }, [userId]);
+
+  // Keep a ref so the polling interval can read current messages without being a dep
+  useEffect(() => { messagesRef.current = messages; }, [messages]);
+
+  // Poll reactions every 3 s — fallback when Pusher doesn't deliver the event
+  useEffect(() => {
+    const id = setInterval(() => {
+      const ids = messagesRef.current.map(m => m.id).filter(id => id > 0);
+      if (ids.length > 0) fetchReactions(ids);
+    }, 3000);
+    return () => clearInterval(id);
+  }, [channelId, fetchReactions]);
 
   const fetchMessages = useCallback(async (cursor?: number) => {
     const url = cursor ? `/api/messages/${channelId}?cursor=${cursor}` : `/api/messages/${channelId}`;
