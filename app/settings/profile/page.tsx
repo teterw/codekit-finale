@@ -37,6 +37,8 @@ export default function ProfileSettingsPage() {
   const [saved, setSaved] = useState(false);
   const [dirty, setDirty] = useState(false);
   const [uploadError, setUploadError] = useState('');
+  const [profileLoaded, setProfileLoaded] = useState(false);
+  const [loadError, setLoadError] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -46,7 +48,11 @@ export default function ProfileSettingsPage() {
     setUserId(uid);
 
     fetch('/api/profile/me', { headers: { 'x-user-id': id } })
-      .then(r => r.json())
+      .then(async r => {
+        const d = await r.json();
+        if (!r.ok) throw new Error(d.error ?? `HTTP ${r.status}`);
+        return d;
+      })
       .then(d => {
         const u = d.user as Profile;
         setProfile(u);
@@ -55,8 +61,11 @@ export default function ProfileSettingsPage() {
         setBio(u.bio ?? '');
         setStatus(u.status ?? 'online');
         setAvatarPreview(u.avatar ?? null);
+        setProfileLoaded(true);
       })
-      .catch(() => {});
+      .catch(e => {
+        setLoadError(`Failed to load profile: ${e.message}`);
+      });
   }, [router]);
 
   const { startUpload, isUploading } = useUploadThing('avatarUploader', {
@@ -86,14 +95,16 @@ export default function ProfileSettingsPage() {
   }
 
   async function handleSave() {
-    if (!dirty || saving || !userId) return;
+    if (!dirty || saving || !userId || !profileLoaded) return;
+    const trimmedName = name.trim();
+    if (trimmedName.length < 2) { setSaveError('Display name must be at least 2 characters.'); return; }
     setSaving(true);
     setSaveError('');
     try {
       const res = await fetch('/api/profile/me', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json', 'x-user-id': String(userId) },
-        body: JSON.stringify({ name: name.trim(), username: username.trim() || null, bio: bio.trim() || null, status, avatar: avatarPreview }),
+        body: JSON.stringify({ name: trimmedName, username: username.trim() || null, bio: bio.trim() || null, status, avatar: avatarPreview }),
       });
       const data = await res.json();
       if (!res.ok) { setSaveError(data.error ?? 'Failed to save'); return; }
@@ -110,6 +121,28 @@ export default function ProfileSettingsPage() {
   function markDirty() { setDirty(true); setSaved(false); }
 
   if (!userId) return null;
+
+  if (loadError) {
+    return (
+      <div className="min-h-screen flex items-center justify-center" style={{ background: 'var(--bg)' }}>
+        <div className="text-center space-y-3 p-6 rounded-2xl max-w-sm" style={{ background: 'var(--bg-card)', border: '1px solid var(--border)' }}>
+          <p className="text-sm font-semibold" style={{ color: 'var(--danger)' }}>Could not load profile</p>
+          <p className="text-xs" style={{ color: 'var(--text-3)' }}>{loadError}</p>
+          <button onClick={() => router.refresh()} className="px-4 py-2 rounded-lg text-sm text-white" style={{ background: 'var(--accent)' }}>
+            Retry
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  if (!profileLoaded) {
+    return (
+      <div className="min-h-screen flex items-center justify-center" style={{ background: 'var(--bg)' }}>
+        <div className="w-8 h-8 rounded-full border-4 border-t-transparent animate-spin" style={{ borderColor: 'var(--accent)', borderTopColor: 'transparent' }} />
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen" style={{ background: 'var(--bg)' }}>
