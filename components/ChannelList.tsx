@@ -17,18 +17,31 @@ export default function ChannelList({ userId }: { userId: number }) {
   const [serverName, setServerName] = useState('');
 
   useEffect(() => {
-    if (!serverId) {
-      setChannels([]);
-      setServerName('');
-      return;
-    }
-    fetch(`/api/servers/${serverId}`, { headers: { 'x-user-id': String(userId) } })
-      .then(r => r.json())
-      .then(data => {
+    let cancelled = false;
+
+    queueMicrotask(async () => {
+      if (cancelled) return;
+
+      if (!serverId) {
+        setChannels([]);
+        setServerName('');
+        return;
+      }
+
+      try {
+        const response = await fetch(`/api/servers/${serverId}`, { headers: { 'x-user-id': String(userId) } });
+        const data = await response.json();
+        if (cancelled) return;
         setServerName(data.server?.name ?? '');
         setChannels(data.channels ?? []);
-      })
-      .catch(() => {});
+      } catch {
+        // Leave the current list in place if the sidebar refresh fails.
+      }
+    });
+
+    return () => {
+      cancelled = true;
+    };
   }, [serverId, userId]);
 
   const textChannels = channels.filter(c => c.type === 'text');

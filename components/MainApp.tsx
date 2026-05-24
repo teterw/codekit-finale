@@ -7,6 +7,7 @@ import ServerSidebar from './ServerSidebar';
 import ChannelSidebar from './ChannelSidebar';
 import ChatArea from './ChatArea';
 import VoiceChannel from './VoiceChannel';
+import FeatureHub from './FeatureHub';
 import InviteModal from './InviteModal';
 import SearchModal from './SearchModal';
 import CreateServerModal from './CreateServerModal';
@@ -31,10 +32,19 @@ export default function MainApp() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const id = localStorage.getItem('userId');
-    const name = localStorage.getItem('userName');
-    if (id && name) { setUserId(Number(id)); setUserName(name); }
-    setLoading(false);
+    let cancelled = false;
+
+    queueMicrotask(() => {
+      if (cancelled) return;
+      const id = localStorage.getItem('userId');
+      const name = localStorage.getItem('userName');
+      if (id && name) { setUserId(Number(id)); setUserName(name); }
+      setLoading(false);
+    });
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   const fetchServers = useCallback(async (uid: number) => {
@@ -58,20 +68,30 @@ export default function MainApp() {
 
   useEffect(() => {
     if (!userId) return;
+    let cancelled = false;
+
     fetch('/api/profile/me', { headers: { 'x-user-id': String(userId) } })
       .then(r => r.json())
       .then(d => {
+        if (cancelled) return;
         if (d.user?.avatar !== undefined) setUserAvatar(d.user.avatar);
         if (d.user?.status) setUserStatus(d.user.status);
         if (d.user?.name) setUserName(d.user.name);
       })
       .catch(() => {});
-    fetchServers(userId).then(list => {
+
+    queueMicrotask(async () => {
+      const list = await fetchServers(userId);
+      if (cancelled) return;
       if (list && list.length > 0) {
         setSelectedServer(list[0]);
         fetchServerDetails(userId, list[0].id);
       }
     });
+
+    return () => {
+      cancelled = true;
+    };
   }, [userId, fetchServers, fetchServerDetails]);
 
   function handleAuth(uid: number, name: string) {
@@ -115,6 +135,33 @@ export default function MainApp() {
       setSelectedServer(joined);
       await fetchServerDetails(userId, serverId);
     }
+  }
+
+  function handleServerUpdated(updatedServer: Server) {
+    setServers(prev => prev.map(server => (server.id === updatedServer.id ? updatedServer : server)));
+    if (selectedServer?.id === updatedServer.id) {
+      setSelectedServer(updatedServer);
+    }
+  }
+
+  function handleServerDeleted(serverId: number) {
+    setServers(prev => {
+      const remaining = prev.filter(server => server.id !== serverId);
+      if (selectedServer?.id === serverId) {
+        if (remaining.length > 0) {
+          const next = remaining[0];
+          setSelectedServer(next);
+          if (userId) {
+            fetchServerDetails(userId, next.id);
+          }
+        } else {
+          setSelectedServer(null);
+          setChannels([]);
+          setSelectedChannel(null);
+        }
+      }
+      return remaining;
+    });
   }
 
   if (loading) {
@@ -218,6 +265,8 @@ export default function MainApp() {
           userStatus={userStatus}
           onSelectChannel={ch => { setSelectedChannel(ch); }}
           onCreateInvite={() => {}}
+          onServerUpdated={handleServerUpdated}
+          onServerDeleted={handleServerDeleted}
           onLogout={handleLogout}
         />
       </div>
@@ -257,6 +306,8 @@ export default function MainApp() {
                 userStatus={userStatus}
                 onSelectChannel={ch => { setSelectedChannel(ch); setMobileSidebarOpen(false); }}
                 onCreateInvite={() => {}}
+                onServerUpdated={handleServerUpdated}
+                onServerDeleted={handleServerDeleted}
                 onLogout={handleLogout}
               />
             </motion.div>
@@ -332,12 +383,20 @@ export default function MainApp() {
                 channelId={selectedChannel.id}
                 channelName={selectedChannel.name}
                 userId={userId}
+                userName={userName}
                 onOpenSearch={() => setShowSearchModal(true)}
               />
             </motion.div>
           )}
         </AnimatePresence>
       </main>
+
+      <FeatureHub
+        server={selectedServer}
+        activeChannel={selectedChannel}
+        userId={userId}
+        userName={userName}
+      />
 
       {/* Modals */}
       <AnimatePresence>

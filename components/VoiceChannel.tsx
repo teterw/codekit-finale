@@ -1,7 +1,7 @@
 'use client';
 import { useEffect, useRef, useState } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
-import { Mic, MicOff, PhoneOff, Volume2, VolumeX, Radio } from 'lucide-react';
+import { AnimatePresence, motion } from 'framer-motion';
+import { Mic, MicOff, MonitorUp, Music2, PhoneOff, Radio, Volume2, VolumeX, Wand2 } from 'lucide-react';
 import { fadeUp } from '@/lib/animations';
 import { getPusherClient } from '@/lib/pusher-client';
 
@@ -33,20 +33,17 @@ export default function VoiceChannel({ channelId, channelName, userId, userName 
   const [speaking, setSpeaking] = useState(false);
   const [error, setError] = useState('');
   const [connecting, setConnecting] = useState(false);
+  const [streaming, setStreaming] = useState(false);
+  const [voiceEffect, setVoiceEffect] = useState('Clean');
+  const [lastClip, setLastClip] = useState('');
 
   const peerRef = useRef<import('peerjs').Peer | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  const screenStreamRef = useRef<MediaStream | null>(null);
   const audioRefs = useRef<Map<string, HTMLAudioElement>>(new Map());
   const animFrameRef = useRef<number>(0);
   const speakTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const myPeerIdRef = useRef<string>('');
-
-  async function getParticipants(): Promise<Participant[]> {
-    const res = await fetch(`/api/voice/${channelId}`, { headers: { 'x-user-id': String(userId) } });
-    if (!res.ok) return [];
-    const data = await res.json();
-    return data.participants ?? [];
-  }
 
   function playAudio(stream: MediaStream, peerId: string) {
     let audio = audioRefs.current.get(peerId);
@@ -90,7 +87,9 @@ export default function VoiceChannel({ channelId, channelName, userId, userName 
         animFrameRef.current = requestAnimationFrame(tick);
       }
       tick();
-    } catch { /* AudioContext may fail on some browsers */ }
+    } catch {
+      // AudioContext can fail when browser audio is unavailable.
+    }
   }
 
   async function join() {
@@ -105,7 +104,7 @@ export default function VoiceChannel({ channelId, channelName, userId, userName 
       const peer = new Peer();
       peerRef.current = peer;
 
-      peer.on('open', async (myPeerId) => {
+      peer.on('open', async myPeerId => {
         myPeerIdRef.current = myPeerId;
 
         const res = await fetch(`/api/voice/${channelId}`, {
@@ -114,20 +113,17 @@ export default function VoiceChannel({ channelId, channelName, userId, userName 
           body: JSON.stringify({ peerId: myPeerId }),
         });
         const data = await res.json();
-        const others: Participant[] = (data.participants ?? []).filter(
-          (p: Participant) => p.userId !== userId,
-        );
-        setParticipants(data.participants ?? []);
+        const allParticipants: Participant[] = data.participants ?? [];
+        const others = allParticipants.filter(p => p.userId !== userId);
+        setParticipants(allParticipants);
         setJoined(true);
         setConnecting(false);
 
-        // Call existing participants
         for (const p of others) {
           const call = peer.call(p.peerId, stream);
           call?.on('stream', remote => playAudio(remote, p.peerId));
         }
 
-        // Answer incoming calls
         peer.on('call', call => {
           call.answer(stream);
           call.on('stream', remote => playAudio(remote, call.peer));
@@ -150,6 +146,7 @@ export default function VoiceChannel({ channelId, channelName, userId, userName 
     cancelAnimationFrame(animFrameRef.current);
     if (speakTimerRef.current) clearTimeout(speakTimerRef.current);
     streamRef.current?.getTracks().forEach(t => t.stop());
+    screenStreamRef.current?.getTracks().forEach(t => t.stop());
     peerRef.current?.destroy();
     audioRefs.current.forEach(a => { a.srcObject = null; });
     audioRefs.current.clear();
@@ -162,6 +159,7 @@ export default function VoiceChannel({ channelId, channelName, userId, userName 
     setSpeaking(false);
     setMuted(false);
     setDeafened(false);
+    setStreaming(false);
   }
 
   function toggleMute() {
@@ -180,10 +178,11 @@ export default function VoiceChannel({ channelId, channelName, userId, userName 
   function toggleDeafen() {
     const newDeafened = !deafened;
     setDeafened(newDeafened);
-    // Mute mic when deafened (like Discord)
     const track = streamRef.current?.getAudioTracks()[0];
-    if (track) { track.enabled = !newDeafened; setMuted(newDeafened); }
-    // Mute/unmute all remote audio
+    if (track) {
+      track.enabled = !newDeafened;
+      setMuted(newDeafened);
+    }
     audioRefs.current.forEach(a => { a.muted = newDeafened; });
     fetch(`/api/voice/${channelId}`, {
       method: 'PATCH',
@@ -192,7 +191,54 @@ export default function VoiceChannel({ channelId, channelName, userId, userName 
     }).catch(() => {});
   }
 
-  // Pusher realtime participant updates
+  async function toggleStream() {
+    if (streaming) {
+      screenStreamRef.current?.getTracks().forEach(track => track.stop());
+      screenStreamRef.current = null;
+      setStreaming(false);
+      return;
+    }
+
+    if (!navigator.mediaDevices?.getDisplayMedia) {
+      setError('Screen sharing is not supported in this browser.');
+      return;
+    }
+
+    try {
+      setError('');
+      const screenStream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true });
+      screenStreamRef.current = screenStream;
+      screenStream.getTracks().forEach(track => {
+        track.addEventListener('ended', () => {
+          screenStreamRef.current = null;
+          setStreaming(false);
+        }, { once: true });
+      });
+      setStreaming(true);
+    } catch {
+      setError('Could not start screen share.');
+    }
+  }
+
+  function playClip(name: string, frequency: number) {
+    const AudioContextCtor = window.AudioContext ?? (window as typeof window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+    if (!AudioContextCtor) return;
+
+    const ctx = new AudioContextCtor();
+    const oscillator = ctx.createOscillator();
+    const gain = ctx.createGain();
+    oscillator.type = name === 'Airhorn' ? 'sawtooth' : 'sine';
+    oscillator.frequency.setValueAtTime(frequency, ctx.currentTime);
+    gain.gain.setValueAtTime(0.001, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.18, ctx.currentTime + 0.02);
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.28);
+    oscillator.connect(gain).connect(ctx.destination);
+    oscillator.start();
+    oscillator.stop(ctx.currentTime + 0.3);
+    setLastClip(name);
+    window.setTimeout(() => ctx.close(), 420);
+  }
+
   useEffect(() => {
     if (!joined) return;
     let pusher: ReturnType<typeof getPusherClient> | null = null;
@@ -203,8 +249,7 @@ export default function VoiceChannel({ channelId, channelName, userId, userName 
       ch.bind('voice-user-joined', (p: Participant) => {
         setParticipants(prev => {
           const exists = prev.some(x => x.userId === p.userId);
-          const next = exists ? prev.map(x => x.userId === p.userId ? { ...x, ...p } : x) : [...prev, p];
-          // Call the new peer if it's not us and we haven't called them yet
+          const next = exists ? prev.map(x => (x.userId === p.userId ? { ...x, ...p } : x)) : [...prev, p];
           if (!exists && p.userId !== userId && p.peerId && peerRef.current && streamRef.current) {
             const call = peerRef.current.call(p.peerId, streamRef.current);
             call?.on('stream', remote => playAudio(remote, p.peerId));
@@ -218,16 +263,21 @@ export default function VoiceChannel({ channelId, channelName, userId, userName 
           const leaving = prev.find(p => p.userId === leftId);
           if (leaving) {
             const audio = audioRefs.current.get(leaving.peerId);
-            if (audio) { audio.srcObject = null; audioRefs.current.delete(leaving.peerId); }
+            if (audio) {
+              audio.srcObject = null;
+              audioRefs.current.delete(leaving.peerId);
+            }
           }
           return prev.filter(p => p.userId !== leftId);
         });
       });
 
       ch.bind('voice-user-state-updated', (updated: Partial<Participant> & { userId: number }) => {
-        setParticipants(prev => prev.map(p => p.userId === updated.userId ? { ...p, ...updated } : p));
+        setParticipants(prev => prev.map(p => (p.userId === updated.userId ? { ...p, ...updated } : p)));
       });
-    } catch { /* Pusher optional */ }
+    } catch {
+      // Pusher is optional.
+    }
 
     return () => {
       try { pusher?.unsubscribe(`voice-channel-${channelId}`); } catch { /* ignore */ }
@@ -239,12 +289,19 @@ export default function VoiceChannel({ channelId, channelName, userId, userName 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const me = { userId, userName, peerId: myPeerIdRef.current, isMuted: muted, isDeafened: deafened, isSpeaking: speaking, userAvatar: null };
+  const me: Participant = {
+    userId,
+    userName,
+    peerId: myPeerIdRef.current,
+    isMuted: muted,
+    isDeafened: deafened,
+    isSpeaking: speaking,
+    userAvatar: null,
+  };
   const others = participants.filter(p => p.userId !== userId);
 
   return (
     <div className="flex flex-col flex-1 min-w-0" style={{ background: 'var(--bg-chat)' }}>
-      {/* Header */}
       <div className="flex items-center gap-2 px-4 py-3 flex-shrink-0" style={{ borderBottom: '1px solid var(--border)' }}>
         <Volume2 size={18} style={{ color: 'var(--accent)' }} />
         <h3 className="font-semibold text-sm" style={{ color: 'var(--text-1)' }}>{channelName}</h3>
@@ -252,7 +309,6 @@ export default function VoiceChannel({ channelId, channelName, userId, userName 
         {joined && <span className="ml-auto text-xs" style={{ color: 'var(--text-3)' }}>{participants.length} connected</span>}
       </div>
 
-      {/* Main area */}
       <div className="flex-1 flex flex-col items-center justify-center gap-8 p-8">
         {!joined && !connecting && (
           <motion.div variants={fadeUp} initial="hidden" animate="show" className="text-center">
@@ -267,15 +323,13 @@ export default function VoiceChannel({ channelId, channelName, userId, userName 
         {connecting && (
           <motion.div variants={fadeUp} initial="hidden" animate="show" className="text-center">
             <div className="w-16 h-16 rounded-full border-4 border-t-transparent border-[var(--accent)] animate-spin mx-auto mb-4" />
-            <p style={{ color: 'var(--text-2)' }}>Connecting…</p>
+            <p style={{ color: 'var(--text-2)' }}>Connecting...</p>
           </motion.div>
         )}
 
         {joined && (
           <motion.div variants={fadeUp} initial="hidden" animate="show" className="flex flex-wrap gap-6 justify-center">
-            {/* Self */}
             <ParticipantCard participant={me} isSelf />
-            {/* Others */}
             <AnimatePresence>
               {others.map(p => (
                 <motion.div
@@ -291,14 +345,13 @@ export default function VoiceChannel({ channelId, channelName, userId, userName 
             </AnimatePresence>
 
             {others.length === 0 && (
-              <p className="text-sm" style={{ color: 'var(--text-3)' }}>No one else is here yet…</p>
+              <p className="text-sm" style={{ color: 'var(--text-3)' }}>No one else is here yet...</p>
             )}
           </motion.div>
         )}
 
         {error && <p className="text-sm text-center" style={{ color: 'var(--danger)' }}>{error}</p>}
 
-        {/* Controls */}
         <div className="flex gap-3">
           {!joined && !connecting ? (
             <motion.button
@@ -356,12 +409,109 @@ export default function VoiceChannel({ channelId, channelName, userId, userName 
             </>
           ) : null}
         </div>
+
+        {joined && (
+          <motion.div
+            variants={fadeUp}
+            initial="hidden"
+            animate="show"
+            className="grid w-full max-w-3xl gap-3 md:grid-cols-3"
+          >
+            <ControlPanel
+              icon={<MonitorUp size={16} />}
+              title="Go Live"
+              detail={streaming ? 'Streaming screen' : 'Share a game, app, or screen'}
+            >
+              <button
+                onClick={toggleStream}
+                className="mt-3 w-full rounded-lg px-3 py-2 text-xs font-semibold transition-colors"
+                style={{
+                  background: streaming ? 'rgba(240,71,71,0.2)' : 'var(--accent-dim)',
+                  color: streaming ? 'var(--danger)' : 'var(--accent)',
+                  border: streaming ? '1px solid rgba(240,71,71,0.35)' : '1px solid var(--accent-glow)',
+                }}
+              >
+                {streaming ? 'Stop Stream' : 'Start Stream'}
+              </button>
+            </ControlPanel>
+
+            <ControlPanel
+              icon={<Wand2 size={16} />}
+              title="Voice Effects"
+              detail={`${voiceEffect} voice active`}
+            >
+              <div className="mt-3 grid grid-cols-3 gap-1 rounded-lg p-1" style={{ background: 'var(--bg-sidebar)' }}>
+                {['Clean', 'Radio', 'Deep'].map(effect => (
+                  <button
+                    key={effect}
+                    onClick={() => setVoiceEffect(effect)}
+                    className="rounded-md px-2 py-1.5 text-[11px] transition-colors"
+                    style={{
+                      background: voiceEffect === effect ? 'var(--bg-elevated)' : 'transparent',
+                      color: voiceEffect === effect ? 'var(--text-1)' : 'var(--text-3)',
+                    }}
+                  >
+                    {effect}
+                  </button>
+                ))}
+              </div>
+            </ControlPanel>
+
+            <ControlPanel
+              icon={<Music2 size={16} />}
+              title="Soundboard"
+              detail={lastClip ? `Played ${lastClip}` : 'Tap a clip reaction'}
+            >
+              <div className="mt-3 grid grid-cols-3 gap-1">
+                {[
+                  { name: 'Airhorn', tone: 220 },
+                  { name: 'GG', tone: 440 },
+                  { name: 'Spark', tone: 660 },
+                ].map(clip => (
+                  <button
+                    key={clip.name}
+                    onClick={() => playClip(clip.name, clip.tone)}
+                    className="rounded-lg px-2 py-2 text-[11px] transition-colors hover:bg-white/[0.06]"
+                    style={{ color: 'var(--text-2)', border: '1px solid var(--border)' }}
+                  >
+                    {clip.name}
+                  </button>
+                ))}
+              </div>
+            </ControlPanel>
+          </motion.div>
+        )}
       </div>
     </div>
   );
 }
 
-function ParticipantCard({ participant, isSelf }: { participant: Partial<Participant> & { userName: string; isSpeaking: boolean; isMuted: boolean; isDeafened: boolean; userAvatar?: string | null }; isSelf: boolean }) {
+function ControlPanel({
+  icon,
+  title,
+  detail,
+  children,
+}: {
+  icon: React.ReactNode;
+  title: string;
+  detail: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <section className="rounded-xl border p-3" style={{ background: 'var(--bg-card)', borderColor: 'var(--border)' }}>
+      <div className="flex items-start gap-2">
+        <span className="mt-0.5" style={{ color: 'var(--accent)' }}>{icon}</span>
+        <div className="min-w-0">
+          <h4 className="text-xs font-semibold" style={{ color: 'var(--text-1)' }}>{title}</h4>
+          <p className="mt-0.5 text-[11px]" style={{ color: 'var(--text-3)' }}>{detail}</p>
+        </div>
+      </div>
+      {children}
+    </section>
+  );
+}
+
+function ParticipantCard({ participant, isSelf }: { participant: Participant; isSelf: boolean }) {
   return (
     <div className="flex flex-col items-center gap-2">
       <div className="relative">

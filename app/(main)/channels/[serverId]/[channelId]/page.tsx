@@ -31,5 +31,12 @@ export default async function ChannelPage({
     notFound();
   }
 
-  return <ChatArea channelId={channelIdNumber} channelName={channel.name} userId={userId} />;
+  return (
+    <ChatArea
+      channelId={channelIdNumber}
+      channelName={channel.name}
+      userId={userId}
+      userName={session?.user?.name ?? 'You'}
+    />
+  );
 }

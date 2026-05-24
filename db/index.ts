@@ -1,6 +1,6 @@
 import { drizzle } from 'drizzle-orm/neon-http';
-import { sql } from 'drizzle-orm';
 import { neon } from '@neondatabase/serverless';
+import { sql } from 'drizzle-orm';
 
 const connectionString = process.env.DATABASE_URL ?? process.env.NEON_DATABASE_URL;
 if (!connectionString) {
@@ -10,7 +10,7 @@ if (!connectionString) {
 const client = neon(connectionString);
 export const db = drizzle(client);
 
-// Schema must be created manually via Neon SQL editor — the app role lacks DDL permissions.
+// Schema must be created manually via Neon SQL editor; the app role lacks DDL permissions.
 export function ensureSchema() {
   return Promise.resolve();
 }
@@ -42,11 +42,9 @@ export function ensureFeatureColumns(): Promise<void> {
   if (_featureMigration) return _featureMigration;
   _featureMigration = (async () => {
     try {
-      // Message enhancements
       await db.execute(sql`ALTER TABLE messages ADD COLUMN IF NOT EXISTS reply_to_id integer`);
       await db.execute(sql`ALTER TABLE messages ADD COLUMN IF NOT EXISTS is_pinned boolean NOT NULL DEFAULT false`);
 
-      // Reactions table
       await db.execute(sql`
         CREATE TABLE IF NOT EXISTS message_reactions (
           id serial PRIMARY KEY,
@@ -61,7 +59,6 @@ export function ensureFeatureColumns(): Promise<void> {
         ON message_reactions(message_id, user_id, emoji)
       `);
 
-      // Voice participant state columns
       await db.execute(sql`ALTER TABLE voice_participants ADD COLUMN IF NOT EXISTS is_muted boolean NOT NULL DEFAULT false`);
       await db.execute(sql`ALTER TABLE voice_participants ADD COLUMN IF NOT EXISTS is_deafened boolean NOT NULL DEFAULT false`);
       await db.execute(sql`ALTER TABLE voice_participants ADD COLUMN IF NOT EXISTS is_speaking boolean NOT NULL DEFAULT false`);
