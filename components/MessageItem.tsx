@@ -38,6 +38,19 @@ interface Props {
   onViewProfile?: (userId: number) => void;
 }
 
+function formatTime(date: Date): string {
+  return date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
+}
+
+function formatTimestamp(date: Date): string {
+  const today = new Date();
+  const yesterday = new Date(today);
+  yesterday.setDate(yesterday.getDate() - 1);
+  if (date.toDateString() === today.toDateString()) return `Today at ${formatTime(date)}`;
+  if (date.toDateString() === yesterday.toDateString()) return `Yesterday at ${formatTime(date)}`;
+  return date.toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' });
+}
+
 export default function MessageItem({
   message,
   currentUserId,
@@ -59,8 +72,11 @@ export default function MessageItem({
   const pickerRef = useRef<HTMLDivElement>(null);
   const isOwn = message.userId === currentUserId;
 
-  const time = new Date(message.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-  const wasEdited = new Date(message.updatedAt).getTime() - new Date(message.createdAt).getTime() > 1000;
+  const createdDate = new Date(message.createdAt);
+  const updatedDate = new Date(message.updatedAt);
+  const timestamp = formatTimestamp(createdDate);
+  const shortTime = formatTime(createdDate);
+  const wasEdited = updatedDate.getTime() - createdDate.getTime() > 1000;
 
   function viewProfile() {
     if (onViewProfile) onViewProfile(message.userId);
@@ -69,7 +85,10 @@ export default function MessageItem({
 
   async function saveEdit() {
     const content = editContent.trim();
-    if (!content || content === message.content || saving) { setEditing(false); return; }
+    if (!content || content === message.content || saving) {
+      setEditing(false);
+      return;
+    }
     setSaving(true);
     const res = await fetch(`/api/messages/${channelId}/${message.id}`, {
       method: 'PATCH',
@@ -85,7 +104,7 @@ export default function MessageItem({
   }
 
   async function deleteMsg() {
-    if (!confirm('Delete this message?')) return;
+    if (!confirm('Are you sure you want to delete this message?')) return;
     const res = await fetch(`/api/messages/${channelId}/${message.id}`, {
       method: 'DELETE',
       headers: { 'x-user-id': String(currentUserId) },
@@ -106,19 +125,18 @@ export default function MessageItem({
   }
 
   return (
-    <motion.div
-      layout="position"
-      className="message-hover relative flex items-start gap-3 px-4 group"
-      style={{ paddingTop: isGrouped ? '2px' : '12px', paddingBottom: '2px' }}
+    <div
+      className="message-hover group relative flex items-start gap-4 px-4"
+      style={{ paddingTop: isGrouped ? '2px' : '17px', paddingBottom: '2px' }}
     >
       <div className="w-10 flex-shrink-0 flex justify-center">
         {isGrouped ? (
-          <span className="text-xs opacity-0 group-hover:opacity-100 transition-opacity select-none pt-0.5" style={{ color: 'var(--text-3)', fontSize: '10px', lineHeight: '20px' }}>
-            {time}
+          <span className="opacity-0 group-hover:opacity-100 text-[11px] select-none mt-0.5 w-10 text-center" style={{ color: 'var(--text-3)', lineHeight: '22px' }}>
+            {shortTime}
           </span>
         ) : (
           <button
-            className="w-10 h-10 rounded-full flex items-center justify-center text-white text-xs font-bold flex-shrink-0 mt-0.5 overflow-hidden hover:ring-2 hover:ring-[var(--accent)] transition-shadow"
+            className="w-10 h-10 rounded-full overflow-hidden flex items-center justify-center text-white text-xs font-bold flex-shrink-0 hover:opacity-90 transition-opacity mt-0.5"
             style={{ background: 'var(--accent)' }}
             onClick={viewProfile}
           >
@@ -134,13 +152,13 @@ export default function MessageItem({
       <div className="flex-1 min-w-0">
         {!isGrouped && (
           <div className="flex items-baseline gap-2 mb-0.5">
-            <button className="font-semibold text-sm hover:underline" style={{ color: 'var(--text-1)' }} onClick={viewProfile}>
+            <button className="font-semibold text-[15px] hover:underline" style={{ color: 'var(--text-1)' }} onClick={viewProfile}>
               {message.userName}
             </button>
-            <span className="text-xs" style={{ color: 'var(--text-3)' }}>{time}</span>
-            {wasEdited && <span className="text-xs" style={{ color: 'var(--text-3)' }}>(edited)</span>}
+            <span className="text-[11px]" style={{ color: 'var(--text-3)' }}>{timestamp}</span>
+            {wasEdited && <span className="text-[11px]" style={{ color: 'var(--text-3)' }}>(edited)</span>}
             {message.isPinned && (
-              <span className="text-xs px-1.5 py-0.5 rounded" style={{ background: 'var(--accent-dim)', color: 'var(--accent)', fontSize: '10px' }}>
+              <span className="text-[11px] px-1.5 py-0.5 rounded" style={{ background: 'var(--accent-dim)', color: 'var(--accent)' }}>
                 pinned
               </span>
             )}
@@ -148,17 +166,14 @@ export default function MessageItem({
         )}
 
         {message.replyToId && message.replyToContent && (
-          <div
-            className="flex items-start gap-2 mb-1 pl-2 rounded text-xs cursor-pointer hover:opacity-80 transition-opacity"
-            style={{ borderLeft: '2px solid var(--text-3)', color: 'var(--text-3)' }}
-          >
+          <div className="flex items-start gap-2 mb-1 pl-2 rounded text-xs cursor-pointer hover:opacity-80 transition-opacity" style={{ borderLeft: '2px solid var(--text-3)', color: 'var(--text-3)' }}>
             <span className="font-semibold" style={{ color: 'var(--text-2)' }}>{message.replyToUserName}</span>
             <span className="truncate">{message.replyToContent.slice(0, 80)}{message.replyToContent.length > 80 ? '...' : ''}</span>
           </div>
         )}
 
         {editing ? (
-          <div className="mt-1">
+          <div>
             <textarea
               autoFocus
               value={editContent}
@@ -168,17 +183,21 @@ export default function MessageItem({
                 if (e.key === 'Escape') { setEditing(false); setEditContent(message.content); }
               }}
               rows={2}
-              className="w-full rounded-lg px-3 py-2 text-sm outline-none resize-none"
-              style={{ background: 'var(--bg-elevated)', border: '1px solid var(--accent)', color: 'var(--text-1)', boxShadow: '0 0 0 3px var(--accent-dim)' }}
+              className="w-full rounded px-3 py-2 text-[15px] outline-none resize-none"
+              style={{ background: 'var(--bg-elevated)', border: '1px solid var(--accent)', color: 'var(--text-msg)', boxShadow: '0 0 0 2px rgba(88,101,242,0.3)' }}
             />
-            <div className="flex items-center gap-2 mt-1.5">
-              <p className="text-xs" style={{ color: 'var(--text-3)' }}>Enter to save - Esc to cancel</p>
-              <button onClick={() => { setEditing(false); setEditContent(message.content); }} className="p-1 rounded" style={{ color: 'var(--text-3)' }}><X size={12} /></button>
-              <button onClick={saveEdit} disabled={saving} className="p-1 rounded" style={{ color: 'var(--online)' }}><Check size={12} /></button>
+            <div className="flex items-center gap-2 mt-1">
+              <span className="text-[12px]" style={{ color: 'var(--text-3)' }}>Enter to save - Esc to cancel</span>
+              <button onClick={() => { setEditing(false); setEditContent(message.content); }} className="p-1 rounded" style={{ color: 'var(--text-3)' }}>
+                <X size={12} />
+              </button>
+              <button onClick={saveEdit} disabled={saving} className="p-1 rounded" style={{ color: 'var(--online)' }}>
+                <Check size={12} />
+              </button>
             </div>
           </div>
         ) : (
-          <div className="text-sm leading-relaxed break-words prose prose-invert prose-sm max-w-none" style={{ color: 'var(--text-1)' }}>
+          <div className="text-[15px] leading-[1.375rem] break-words prose prose-invert prose-sm max-w-none" style={{ color: 'var(--text-msg)' }}>
             <ReactMarkdown
               remarkPlugins={[remarkGfm]}
               components={{
@@ -245,12 +264,7 @@ export default function MessageItem({
           >
             {onReaction && (
               <div className="relative" ref={pickerRef}>
-                <button
-                  onClick={() => setShowEmojiPicker(p => !p)}
-                  className="flex items-center gap-1 px-2 py-1.5 text-xs transition-colors hover:bg-white/10"
-                  style={{ color: 'var(--text-2)' }}
-                  title="React"
-                >
+                <button onClick={() => setShowEmojiPicker(p => !p)} className="flex items-center gap-1 px-2 py-1.5 text-xs transition-colors hover:bg-white/10" style={{ color: 'var(--text-2)' }} title="React">
                   <SmilePlus size={12} />
                 </button>
                 <AnimatePresence>
@@ -282,51 +296,26 @@ export default function MessageItem({
             )}
 
             {onReply && (
-              <button
-                onClick={() => onReply(message)}
-                className="flex items-center gap-1 px-2 py-1.5 text-xs transition-colors hover:bg-white/10"
-                style={{ color: 'var(--text-2)' }}
-                title="Reply"
-              >
+              <button onClick={() => onReply(message)} className="flex items-center gap-1 px-2 py-1.5 text-xs transition-colors hover:bg-white/10" style={{ color: 'var(--text-2)' }} title="Reply">
                 <Reply size={12} />
               </button>
             )}
 
             {onOpenThread && (
-              <button
-                onClick={() => onOpenThread(message)}
-                className="flex items-center gap-1 px-2 py-1.5 text-xs transition-colors hover:bg-white/10"
-                style={{ color: 'var(--text-2)' }}
-                title="Open thread"
-              >
+              <button onClick={() => onOpenThread(message)} className="flex items-center gap-1 px-2 py-1.5 text-xs transition-colors hover:bg-white/10" style={{ color: 'var(--text-2)' }} title="Open thread">
                 <MessageCircle size={12} />
               </button>
             )}
 
             {isOwn && (
               <>
-                <button
-                  onClick={() => { setEditing(true); setEditContent(message.content); }}
-                  className="flex items-center gap-1 px-2 py-1.5 text-xs transition-colors hover:bg-white/10"
-                  style={{ color: 'var(--text-2)' }}
-                  title="Edit"
-                >
+                <button onClick={() => { setEditing(true); setEditContent(message.content); }} className="flex items-center gap-1 px-2 py-1.5 text-xs transition-colors hover:bg-white/10" style={{ color: 'var(--text-2)' }} title="Edit">
                   <Pencil size={12} />
                 </button>
-                <button
-                  onClick={togglePin}
-                  className="flex items-center gap-1 px-2 py-1.5 text-xs transition-colors hover:bg-white/10"
-                  style={{ color: message.isPinned ? 'var(--accent)' : 'var(--text-2)' }}
-                  title={message.isPinned ? 'Unpin' : 'Pin'}
-                >
+                <button onClick={togglePin} className="flex items-center gap-1 px-2 py-1.5 text-xs transition-colors hover:bg-white/10" style={{ color: message.isPinned ? 'var(--accent)' : 'var(--text-2)' }} title={message.isPinned ? 'Unpin' : 'Pin'}>
                   <Pin size={12} />
                 </button>
-                <button
-                  onClick={deleteMsg}
-                  className="flex items-center gap-1 px-2 py-1.5 text-xs transition-colors hover:bg-[rgba(240,71,71,0.15)]"
-                  style={{ color: 'var(--text-2)' }}
-                  title="Delete"
-                >
+                <button onClick={deleteMsg} className="flex items-center gap-1 px-2 py-1.5 text-xs transition-colors hover:bg-[rgba(240,71,71,0.15)]" style={{ color: 'var(--text-2)' }} title="Delete">
                   <Trash2 size={12} />
                 </button>
               </>
@@ -334,6 +323,6 @@ export default function MessageItem({
           </motion.div>
         )}
       </AnimatePresence>
-    </motion.div>
+    </div>
   );
 }

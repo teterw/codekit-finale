@@ -3,7 +3,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { ArrowDown, Hash, MessageCircle, Pin, Search, Send, X } from 'lucide-react';
-import { fadeUp } from '@/lib/animations';
 import { getPusherClient } from '@/lib/pusher-client';
 import MessageItem from './MessageItem';
 import TypingIndicator from './TypingIndicator';
@@ -23,8 +22,8 @@ interface Message {
 }
 
 type Reaction = { emoji: string; count: number; userReacted: boolean };
-
 interface ReplyTarget { id: number; content: string; userName: string; }
+interface ThreadReply { author: string; content: string; time: string; }
 
 interface Props {
   channelId: number;
@@ -33,12 +32,6 @@ interface Props {
   userName: string;
   onOpenSearch?: () => void;
   onViewProfile?: (userId: number) => void;
-}
-
-interface ThreadReply {
-  author: string;
-  content: string;
-  time: string;
 }
 
 const TYPING_DEBOUNCE = 2000;
@@ -58,15 +51,14 @@ function getDateLabel(date: Date): string {
   yesterday.setDate(yesterday.getDate() - 1);
   if (date.toDateString() === today.toDateString()) return 'Today';
   if (date.toDateString() === yesterday.toDateString()) return 'Yesterday';
-  return date.toLocaleDateString([], { month: 'long', day: 'numeric', year: 'numeric' });
+  return date.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
 }
 
 function needsDateDivider(messages: Message[], index: number): string | null {
   const date = new Date(messages[index].createdAt);
   if (index === 0) return getDateLabel(date);
   const prevDate = new Date(messages[index - 1].createdAt);
-  if (date.toDateString() !== prevDate.toDateString()) return getDateLabel(date);
-  return null;
+  return date.toDateString() !== prevDate.toDateString() ? getDateLabel(date) : null;
 }
 
 export default function ChatArea({ channelId, channelName, userId, userName, onOpenSearch, onViewProfile }: Props) {
@@ -87,6 +79,7 @@ export default function ChatArea({ channelId, channelName, userId, userName, onO
   const [threadReplies, setThreadReplies] = useState<Record<number, ThreadReply[]>>({});
   const bottomRef = useRef<HTMLDivElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
   const typingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isTypingRef = useRef(false);
 
@@ -100,7 +93,7 @@ export default function ChatArea({ channelId, channelName, userId, userName, onO
       const data = await res.json();
       setReactionsMap(prev => ({ ...prev, ...data.reactions }));
     } catch {
-      // Reactions are non-critical for message loading.
+      // Reactions are non-critical.
     }
   }, [userId]);
 
@@ -148,9 +141,8 @@ export default function ChatArea({ channelId, channelName, userId, userName, onO
         setMessages(prev => (prev.some(m => m.id === msg.id) ? prev : [...prev, msg]));
         fetchReactions([msg.id]);
         const list = listRef.current;
-        if (list) {
-          const isNearBottom = list.scrollHeight - list.scrollTop - list.clientHeight < 120;
-          if (isNearBottom) setTimeout(() => bottomRef.current?.scrollIntoView({ behavior: 'smooth' }), 50);
+        if (list && list.scrollHeight - list.scrollTop - list.clientHeight < 150) {
+          setTimeout(() => bottomRef.current?.scrollIntoView({ behavior: 'smooth' }), 50);
         }
       });
       channel.bind('message-updated', (updated: Message) => {
@@ -163,8 +155,7 @@ export default function ChatArea({ channelId, channelName, userId, userName, onO
         setReactionsMap(prev => ({ ...prev, [messageId]: reactions }));
       });
       channel.bind('typing-start', ({ userId: tid, userName: typerName }: { userId: number; userName: string }) => {
-        if (tid === userId) return;
-        setTypers(prev => new Map(prev).set(tid, typerName));
+        if (tid !== userId) setTypers(prev => new Map(prev).set(tid, typerName));
       });
       channel.bind('typing-stop', ({ userId: tid }: { userId: number }) => {
         setTypers(prev => {
@@ -208,9 +199,9 @@ export default function ChatArea({ channelId, channelName, userId, userName, onO
     if (!nextCursor || loadingMore) return;
     setLoadingMore(true);
     const list = listRef.current;
-    const prevScrollHeight = list?.scrollHeight ?? 0;
+    const prevHeight = list?.scrollHeight ?? 0;
     await fetchMessages(nextCursor);
-    if (list) list.scrollTop = list.scrollHeight - prevScrollHeight;
+    if (list) list.scrollTop = list.scrollHeight - prevHeight;
     setLoadingMore(false);
   }
 
@@ -226,9 +217,9 @@ export default function ChatArea({ channelId, channelName, userId, userName, onO
     }
   }
 
-  function handleInputChange(val: string) {
-    setInput(val);
-    if (val.trim() && !isTypingRef.current) {
+  function handleInputChange(value: string) {
+    setInput(value);
+    if (value.trim() && !isTypingRef.current) {
       isTypingRef.current = true;
       sendTypingEvent(true);
     }
@@ -239,10 +230,11 @@ export default function ChatArea({ channelId, channelName, userId, userName, onO
     }, TYPING_DEBOUNCE);
   }
 
-  async function sendMessage(e: React.FormEvent) {
-    e.preventDefault();
+  async function sendMessage(event?: React.FormEvent) {
+    event?.preventDefault();
     const content = input.trim();
     if (!content || sending) return;
+    const replyToId = replyTarget?.id;
     setSending(true);
     setInput('');
     setReplyTarget(null);
@@ -253,10 +245,22 @@ export default function ChatArea({ channelId, channelName, userId, userName, onO
       await fetch(`/api/messages/${channelId}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'x-user-id': String(userId) },
-        body: JSON.stringify({ content, replyToId: replyTarget?.id }),
+        body: JSON.stringify({ content, replyToId }),
       });
     } finally {
       setSending(false);
+      inputRef.current?.focus();
+    }
+  }
+
+  function handleInputKey(event: React.KeyboardEvent<HTMLTextAreaElement>) {
+    if (event.key === 'Enter' && !event.shiftKey) {
+      event.preventDefault();
+      sendMessage();
+    }
+    if (event.key === 'Escape' && replyTarget) {
+      event.preventDefault();
+      setReplyTarget(null);
     }
   }
 
@@ -272,8 +276,8 @@ export default function ChatArea({ channelId, channelName, userId, userName, onO
     }
   }
 
-  function handleDragOver(e: React.DragEvent) {
-    e.preventDefault();
+  function handleDragOver(event: React.DragEvent) {
+    event.preventDefault();
     setIsDraggingOver(true);
   }
 
@@ -281,22 +285,20 @@ export default function ChatArea({ channelId, channelName, userId, userName, onO
     setIsDraggingOver(false);
   }
 
-  async function handleDrop(e: React.DragEvent) {
-    e.preventDefault();
+  async function handleDrop(event: React.DragEvent) {
+    event.preventDefault();
     setIsDraggingOver(false);
-    const file = e.dataTransfer.files?.[0];
-    if (!file) return;
-    if (file.type.startsWith('image/')) {
-      await fetch(`/api/messages/${channelId}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-user-id': String(userId) },
-        body: JSON.stringify({ content: `[Image: ${file.name}]` }),
-      });
-    }
+    const file = event.dataTransfer.files?.[0];
+    if (!file || !file.type.startsWith('image/')) return;
+    await fetch(`/api/messages/${channelId}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-user-id': String(userId) },
+      body: JSON.stringify({ content: `[Image: ${file.name}]` }),
+    });
   }
 
-  function sendThreadReply(e: React.FormEvent) {
-    e.preventDefault();
+  function sendThreadReply(event: React.FormEvent) {
+    event.preventDefault();
     if (!threadMessage) return;
     const content = threadDraft.trim();
     if (!content) return;
@@ -304,11 +306,7 @@ export default function ChatArea({ channelId, channelName, userId, userName, onO
       ...prev,
       [threadMessage.id]: [
         ...(prev[threadMessage.id] ?? []),
-        {
-          author: userName || 'You',
-          content,
-          time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-        },
+        { author: userName || 'You', content, time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) },
       ],
     }));
     setThreadDraft('');
@@ -376,9 +374,7 @@ export default function ChatArea({ channelId, channelName, userId, userName, onO
             style={{ background: 'var(--bg-elevated)', borderBottom: '1px solid var(--border)' }}
           >
             <div className="px-4 py-3">
-              <p className="text-xs font-semibold uppercase tracking-wider mb-2" style={{ color: 'var(--text-3)' }}>
-                Pinned Messages
-              </p>
+              <p className="text-xs font-semibold uppercase tracking-wider mb-2" style={{ color: 'var(--text-3)' }}>Pinned Messages</p>
               <div className="space-y-1 max-h-32 overflow-y-auto">
                 {pinnedMessages.map(m => (
                   <div key={m.id} className="flex items-start gap-2 text-xs py-1 px-2 rounded hover:bg-white/5">
@@ -421,37 +417,33 @@ export default function ChatArea({ channelId, channelName, userId, userName, onO
         )}
 
         {!initialLoading && messages.length === 0 && (
-          <motion.div variants={fadeUp} initial="hidden" animate="show" className="flex flex-col items-center justify-center h-full px-6 text-center">
+          <div className="flex flex-col items-center justify-center h-full px-6 text-center">
             <div className="w-16 h-16 rounded-2xl flex items-center justify-center mb-4" style={{ background: 'var(--accent-dim)', border: '1px solid var(--accent-glow)' }}>
               <Hash size={28} style={{ color: 'var(--accent)' }} />
             </div>
             <h3 className="font-bold text-lg mb-1" style={{ color: 'var(--text-1)' }}>Welcome to #{channelName}</h3>
             <p className="text-sm" style={{ color: 'var(--text-2)' }}>This is the beginning of #{channelName}. Say hello!</p>
-          </motion.div>
+          </div>
         )}
 
-        {!initialLoading && messages.map((msg, i) => {
-          const divider = needsDateDivider(messages, i);
-          const grouped = isGrouped(messages, i);
-          return (
-            <div key={msg.id}>
-              {divider && <DateDivider label={divider} />}
-              <MessageItem
-                message={msg}
-                currentUserId={userId}
-                channelId={channelId}
-                isGrouped={grouped}
-                reactions={reactionsMap[msg.id] ?? []}
-                onUpdated={updated => setMessages(prev => prev.map(m => (m.id === updated.id ? updated : m)))}
-                onDeleted={id => setMessages(prev => prev.filter(m => m.id !== id))}
-                onReply={m => setReplyTarget({ id: m.id, content: m.content, userName: m.userName })}
-                onReaction={handleReaction}
-                onOpenThread={setThreadMessage}
-                onViewProfile={onViewProfile}
-              />
-            </div>
-          );
-        })}
+        {!initialLoading && messages.map((msg, i) => (
+          <div key={msg.id}>
+            {needsDateDivider(messages, i) && <DateDivider label={needsDateDivider(messages, i) ?? ''} />}
+            <MessageItem
+              message={msg}
+              currentUserId={userId}
+              channelId={channelId}
+              isGrouped={isGrouped(messages, i)}
+              reactions={reactionsMap[msg.id] ?? []}
+              onUpdated={updated => setMessages(prev => prev.map(m => (m.id === updated.id ? updated : m)))}
+              onDeleted={id => setMessages(prev => prev.filter(m => m.id !== id))}
+              onReply={m => setReplyTarget({ id: m.id, content: m.content, userName: m.userName })}
+              onReaction={handleReaction}
+              onOpenThread={setThreadMessage}
+              onViewProfile={onViewProfile}
+            />
+          </div>
+        ))}
 
         <TypingIndicator typers={typerNames} />
         <div ref={bottomRef} className="h-2" />
@@ -460,11 +452,11 @@ export default function ChatArea({ channelId, channelName, userId, userName, onO
       <AnimatePresence>
         {showJumpToBottom && (
           <motion.button
-            initial={{ opacity: 0, scale: 0.8 }}
+            initial={{ opacity: 0, scale: 0.85 }}
             animate={{ opacity: 1, scale: 1 }}
-            exit={{ opacity: 0, scale: 0.8 }}
+            exit={{ opacity: 0, scale: 0.85 }}
             onClick={() => bottomRef.current?.scrollIntoView({ behavior: 'smooth' })}
-            className="absolute bottom-24 right-6 w-9 h-9 rounded-full flex items-center justify-center shadow-lg"
+            className="absolute bottom-28 right-6 w-9 h-9 rounded-full flex items-center justify-center shadow-lg"
             style={{ background: 'var(--accent)', color: '#fff', zIndex: 10 }}
           >
             <ArrowDown size={16} />
@@ -496,21 +488,16 @@ export default function ChatArea({ channelId, channelName, userId, userName, onO
         </AnimatePresence>
 
         <form onSubmit={sendMessage}>
-          <div
-            className="flex items-center gap-3 px-4 rounded-xl transition-shadow"
-            style={{ background: 'var(--bg-elevated)', border: '1px solid var(--border)' }}
-            onFocusCapture={e => { (e.currentTarget as HTMLElement).style.borderColor = 'rgba(124,107,255,0.3)'; }}
-            onBlurCapture={e => { (e.currentTarget as HTMLElement).style.borderColor = 'var(--border)'; }}
-          >
-            <input
+          <div className="flex items-center gap-3 px-4 rounded-xl transition-shadow" style={{ background: 'var(--bg-elevated)', border: '1px solid var(--border)' }}>
+            <textarea
+              ref={inputRef}
               value={input}
               onChange={e => handleInputChange(e.target.value)}
-              onKeyDown={e => {
-                if (e.key === 'Escape' && replyTarget) { setReplyTarget(null); e.preventDefault(); }
-              }}
+              onKeyDown={handleInputKey}
               placeholder={replyTarget ? `Reply to ${replyTarget.userName}...` : `Message #${channelName}`}
-              className="flex-1 bg-transparent py-3.5 text-sm outline-none"
-              style={{ color: 'var(--text-1)' }}
+              rows={1}
+              className="flex-1 bg-transparent py-3.5 text-sm outline-none resize-none"
+              style={{ color: 'var(--text-1)', maxHeight: '160px' }}
             />
             <motion.button
               type="submit"
@@ -544,16 +531,21 @@ export default function ChatArea({ channelId, channelName, userId, userName, onO
 
 function DateDivider({ label }: { label: string }) {
   return (
-    <div className="flex items-center gap-3 px-4 my-4">
+    <div className="flex items-center gap-4 px-4 my-4">
       <div className="flex-1 h-px" style={{ background: 'var(--border)' }} />
-      <span className="text-xs font-semibold flex-shrink-0" style={{ color: 'var(--text-3)' }}>{label}</span>
+      <span className="text-xs font-semibold flex-shrink-0 px-1" style={{ color: 'var(--text-3)' }}>{label}</span>
       <div className="flex-1 h-px" style={{ background: 'var(--border)' }} />
     </div>
   );
 }
 
 function ThreadDrawer({
-  message, replies, draft, onDraftChange, onSend, onClose,
+  message,
+  replies,
+  draft,
+  onDraftChange,
+  onSend,
+  onClose,
 }: {
   message: Message;
   replies: ThreadReply[];
@@ -563,6 +555,7 @@ function ThreadDrawer({
   onClose: () => void;
 }) {
   const sourceTime = new Date(message.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
   return (
     <motion.aside
       initial={{ opacity: 0, x: 24 }}
@@ -580,11 +573,7 @@ function ThreadDrawer({
             <p className="truncate text-[11px]" style={{ color: 'var(--text-3)' }}>Replying to {message.userName}</p>
           </div>
         </div>
-        <button
-          onClick={onClose}
-          className="flex h-8 w-8 items-center justify-center rounded-lg transition-colors hover:bg-white/[0.08]"
-          style={{ color: 'var(--text-2)' }}
-        >
+        <button onClick={onClose} className="flex h-8 w-8 items-center justify-center rounded-lg transition-colors hover:bg-white/[0.08]" style={{ color: 'var(--text-2)' }}>
           <X size={15} />
         </button>
       </div>
