@@ -1,5 +1,5 @@
 'use client';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Hash, Volume2, UserPlus, Copy, Check, ChevronDown, LogOut, Edit2 } from 'lucide-react';
 import EditServerModal from './EditServerModal';
@@ -13,6 +13,8 @@ interface Props {
   selectedChannelId: number | null;
   userId: number;
   userName: string;
+  userAvatar?: string | null;
+  userStatus?: string;
   onSelectChannel: (channel: Channel) => void;
   onCreateInvite: () => void;
   onLogout: () => void;
@@ -185,19 +187,44 @@ export default function ChannelSidebar({
         className="flex items-center gap-2 px-2 py-2.5 flex-shrink-0"
         style={{ background: 'var(--bg-sidebar)', borderTop: '1px solid var(--border)' }}
       >
-        <div
-          className="w-8 h-8 rounded-full flex items-center justify-center text-white text-xs font-bold flex-shrink-0"
-          style={{ background: 'var(--accent)' }}
+        <button
+          onClick={onViewOwnProfile}
+          className="relative flex-shrink-0 rounded-full transition-opacity hover:opacity-80"
+          title="View profile"
         >
-          {userName.slice(0, 2).toUpperCase()}
-        </div>
+          {localAvatar ? (
+            <img
+              src={localAvatar}
+              alt={localName}
+              className="w-8 h-8 rounded-full object-cover"
+            />
+          ) : (
+            <div
+              className="w-8 h-8 rounded-full flex items-center justify-center text-white text-xs font-bold"
+              style={{ background: 'var(--accent)' }}
+            >
+              {localName.slice(0, 2).toUpperCase()}
+            </div>
+          )}
+          <div
+            className="absolute bottom-0 right-0 w-2.5 h-2.5 rounded-full border-2"
+            style={{ background: STATUS_DOT[localStatus] ?? STATUS_DOT.online, borderColor: 'var(--bg-sidebar)' }}
+          />
+        </button>
         <div className="flex-1 min-w-0">
-          <p className="text-xs font-semibold truncate" style={{ color: 'var(--text-1)' }}>{userName}</p>
-          <div className="flex items-center gap-1">
-            <div className="w-1.5 h-1.5 rounded-full" style={{ background: 'var(--online)' }} />
-            <p className="text-xs" style={{ color: 'var(--text-3)' }}>Online</p>
-          </div>
+          <p className="text-xs font-semibold truncate" style={{ color: 'var(--text-1)' }}>{localName}</p>
+          <p className="text-xs truncate" style={{ color: 'var(--text-3)' }}>
+            {STATUS_LABEL[localStatus] ?? 'Online'}
+          </p>
         </div>
+        <button
+          onClick={onOpenProfileSettings}
+          title="Profile settings"
+          className="p-1.5 rounded-md transition-colors hover:bg-white/10 flex-shrink-0"
+          style={{ color: 'var(--text-3)' }}
+        >
+          <Settings size={15} />
+        </button>
         <button
           onClick={onLogout}
           title="Log out"

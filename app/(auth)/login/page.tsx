@@ -36,7 +36,7 @@ export default function LoginPage() {
         Welcome back!
       </h1>
       <p className="text-center text-sm mb-6" style={{ color: 'var(--dc-text-muted)' }}>
-        We're so excited to see you again!
+        We&apos;re so excited to see you again!
       </p>
 
       {error && (

@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@neondatabase/serverless": "^1.1.0",
+    "@uploadthing/react": "^7.3.3",
     "drizzle-orm": "^0.45.2",
     "framer-motion": "^12.40.0",
     "lucide-react": "^1.16.0",
@@ -19,7 +20,8 @@
     "pusher": "^5.2.0",
     "pusher-js": "^8.4.0",
     "react": "19.2.4",
-    "react-dom": "19.2.4"
+    "react-dom": "19.2.4",
+    "uploadthing": "^7.7.4"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",

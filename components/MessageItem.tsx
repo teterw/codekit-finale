@@ -1,7 +1,7 @@
 'use client';
 import { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Pencil, Trash2, X, Check } from 'lucide-react';
+import { Check, MessageCircle, Pencil, Trash2, X } from 'lucide-react';
 
 interface Message {
   id: number;
@@ -20,9 +20,20 @@ interface Props {
   isGrouped: boolean;
   onUpdated: (msg: Message) => void;
   onDeleted: (id: number) => void;
+  onOpenThread?: (msg: Message) => void;
+  onViewProfile?: (userId: number) => void;
 }
 
-export default function MessageItem({ message, currentUserId, channelId, isGrouped, onUpdated, onDeleted }: Props) {
+export default function MessageItem({
+  message,
+  currentUserId,
+  channelId,
+  isGrouped,
+  onUpdated,
+  onDeleted,
+  onOpenThread,
+  onViewProfile,
+}: Props) {
   const [editing, setEditing] = useState(false);
   const [editContent, setEditContent] = useState(message.content);
   const [saving, setSaving] = useState(false);
@@ -74,8 +85,9 @@ export default function MessageItem({ message, currentUserId, channelId, isGroup
           </span>
         ) : (
           <div
-            className="w-10 h-10 rounded-full flex items-center justify-center text-white text-xs font-bold flex-shrink-0 mt-0.5 overflow-hidden"
+            className="w-10 h-10 rounded-full flex items-center justify-center text-white text-xs font-bold flex-shrink-0 mt-0.5 overflow-hidden cursor-pointer hover:ring-2 hover:ring-[var(--accent)] transition-shadow"
             style={{ background: 'var(--accent)' }}
+            onClick={() => onViewProfile?.(message.userId)}
           >
             {message.userAvatar ? (
               <img src={message.userAvatar} alt={message.userName} className="w-full h-full object-cover" />
@@ -120,7 +132,7 @@ export default function MessageItem({ message, currentUserId, channelId, isGroup
               }}
             />
             <div className="flex items-center gap-2 mt-1.5">
-              <p className="text-xs" style={{ color: 'var(--text-3)' }}>Enter to save · Esc to cancel</p>
+              <p className="text-xs" style={{ color: 'var(--text-3)' }}>Enter to save - Esc to cancel</p>
               <button onClick={() => { setEditing(false); setEditContent(message.content); }} className="p-1 rounded" style={{ color: 'var(--text-3)' }}>
                 <X size={12} />
               </button>
@@ -141,27 +153,41 @@ export default function MessageItem({ message, currentUserId, channelId, isGroup
 
       {/* Action bar (hover reveal) */}
       <AnimatePresence>
-        {isOwn && !editing && (
+        {(isOwn || onOpenThread) && !editing && (
           <motion.div
             className="message-actions absolute right-4 -top-3 flex gap-0.5 rounded-lg overflow-hidden shadow-lg"
             style={{ background: 'var(--bg-elevated)', border: '1px solid var(--border)' }}
           >
-            <button
-              onClick={() => { setEditing(true); setEditContent(message.content); }}
-              className="flex items-center gap-1 px-2 py-1.5 text-xs transition-colors hover:bg-white/10"
-              style={{ color: 'var(--text-2)' }}
-              title="Edit"
-            >
-              <Pencil size={12} />
-            </button>
-            <button
-              onClick={deleteMsg}
-              className="flex items-center gap-1 px-2 py-1.5 text-xs transition-colors hover:bg-[rgba(240,71,71,0.15)]"
-              style={{ color: 'var(--text-2)' }}
-              title="Delete"
-            >
-              <Trash2 size={12} />
-            </button>
+            {onOpenThread && (
+              <button
+                onClick={() => onOpenThread(message)}
+                className="flex items-center gap-1 px-2 py-1.5 text-xs transition-colors hover:bg-white/10"
+                style={{ color: 'var(--text-2)' }}
+                title="Open thread"
+              >
+                <MessageCircle size={12} />
+              </button>
+            )}
+            {isOwn && (
+              <>
+                <button
+                  onClick={() => { setEditing(true); setEditContent(message.content); }}
+                  className="flex items-center gap-1 px-2 py-1.5 text-xs transition-colors hover:bg-white/10"
+                  style={{ color: 'var(--text-2)' }}
+                  title="Edit"
+                >
+                  <Pencil size={12} />
+                </button>
+                <button
+                  onClick={deleteMsg}
+                  className="flex items-center gap-1 px-2 py-1.5 text-xs transition-colors hover:bg-[rgba(240,71,71,0.15)]"
+                  style={{ color: 'var(--text-2)' }}
+                  title="Delete"
+                >
+                  <Trash2 size={12} />
+                </button>
+              </>
+            )}
           </motion.div>
         )}
       </AnimatePresence>
