@@ -15,14 +15,11 @@ interface Message {
   userId: number;
   userName: string;
   userAvatar: string | null;
-<<<<<<< HEAD
   replyToId?: number | null;
   replyToContent?: string | null;
   replyToUserName?: string | null;
   isPinned?: boolean;
-=======
   pending?: boolean;
->>>>>>> 44d526f851f47154c6f7e63ccc6b88fcd8688c62
 }
 
 type Reaction = { emoji: string; count: number; userReacted: boolean };
@@ -238,15 +235,7 @@ export default function ChatArea({ channelId, channelName, userId, userName, onO
     event?.preventDefault();
     const content = input.trim();
     if (!content || sending) return;
-<<<<<<< HEAD
     const replyToId = replyTarget?.id;
-    setSending(true);
-    setInput('');
-    setReplyTarget(null);
-    if (typingTimerRef.current) clearTimeout(typingTimerRef.current);
-    isTypingRef.current = false;
-    sendTypingEvent(false);
-=======
 
     const tempId = Date.now() * -1;
     const tempMessage: Message = {
@@ -257,15 +246,21 @@ export default function ChatArea({ channelId, channelName, userId, userName, onO
       userId,
       userName,
       userAvatar: null,
+      replyToId,
+      replyToContent: replyTarget?.content,
+      replyToUserName: replyTarget?.userName,
       pending: true,
     };
 
     setMessages(prev => [...prev, tempMessage]);
     setInput('');
+    setReplyTarget(null);
     setSending(true);
+    if (typingTimerRef.current) clearTimeout(typingTimerRef.current);
+    isTypingRef.current = false;
+    sendTypingEvent(false);
     setTimeout(() => bottomRef.current?.scrollIntoView({ behavior: 'smooth' }), 50);
 
->>>>>>> 44d526f851f47154c6f7e63ccc6b88fcd8688c62
     try {
       const res = await fetch(`/api/messages/${channelId}`, {
         method: 'POST',
