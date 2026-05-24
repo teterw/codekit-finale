@@ -1,21 +1,25 @@
-import { Geist, Geist_Mono } from 'next/font/google';
-import './globals.css';
-import Providers from '@/components/providers';
+import type { Metadata } from "next";
+import { Geist } from "next/font/google";
+import "./globals.css";
 
-const geistSans = Geist({ variable: '--font-geist-sans', subsets: ['latin'] });
-const geistMono = Geist_Mono({ variable: '--font-geist-mono', subsets: ['latin'] });
+const geist = Geist({
+  variable: "--font-geist",
+  subsets: ["latin"],
+});
 
-export const metadata = {
-  title: 'Discord Clone',
-  description: 'A Discord Clone',
+export const metadata: Metadata = {
+  title: "Discord Clone",
+  description: "A real-time Discord-like chat application",
 };
 
-export default function RootLayout({ children }: { children: React.ReactNode }) {
+export default function RootLayout({
+  children,
+}: Readonly<{
+  children: React.ReactNode;
+}>) {
   return (
-    <html lang="en" className={`${geistSans.variable} ${geistMono.variable} h-full`}>
-      <body className="h-full">
-        <Providers>{children}</Providers>
-      </body>
+    <html lang="en" className={`${geist.variable} h-full antialiased`}>
+      <body className="h-full bg-[#36393f]">{children}</body>
     </html>
   );
 }

@@ -1,77 +1,62 @@
 'use client';
-import { useEffect, useState } from 'react';
-import { useRouter, useParams } from 'next/navigation';
 
-interface Server {
-  id: number;
-  name: string;
-  icon: string | null;
+interface Server { id: number; name: string; icon: string | null; ownerId: number; }
+
+interface Props {
+  servers: Server[];
+  selectedId: number | null;
+  onSelect: (server: Server) => void;
+  onAddServer: () => void;
+  onJoinServer: () => void;
 }
 
-export default function ServerSidebar({ userId }: { userId: number }) {
-  const [servers, setServers] = useState<Server[]>([]);
-  const params = useParams();
-  const router = useRouter();
-  const activeServerId = params?.serverId ? Number(params.serverId) : null;
-
-  useEffect(() => {
-    fetch('/api/servers', { headers: { 'x-user-id': String(userId) } })
-      .then(r => r.json())
-      .then(data => setServers(data.servers ?? []))
-      .catch(() => {});
-  }, [userId]);
-
+export default function ServerSidebar({ servers, selectedId, onSelect, onAddServer, onJoinServer }: Props) {
   return (
-    <nav
-      className="flex flex-col items-center gap-2 py-3 overflow-y-auto flex-shrink-0"
-      style={{ width: 72, background: 'var(--dc-server-bar)' }}
-    >
-      {/* Home */}
-      <button
-        onClick={() => router.push('/channels')}
-        title="Home"
-        className="w-12 h-12 rounded-full flex items-center justify-center text-xl font-bold transition-all hover:rounded-2xl flex-shrink-0"
-        style={{ background: 'var(--dc-accent)', color: 'white' }}
-      >
-        🏠
-      </button>
-      <div className="w-8 h-px my-1 flex-shrink-0" style={{ background: 'var(--dc-border)' }} />
-
+    <div className="flex flex-col items-center gap-2 py-3 w-[72px] min-w-[72px] bg-[#202225] overflow-y-auto">
       {servers.map(server => {
-        const isActive = server.id === activeServerId;
-        const initials = server.name
-          .split(' ')
-          .map(w => w[0])
-          .join('')
-          .slice(0, 2)
-          .toUpperCase();
-
+        const selected = server.id === selectedId;
+        const initials = server.name.slice(0, 2).toUpperCase();
         return (
-          <button
-            key={server.id}
-            onClick={() => router.push(`/channels/${server.id}`)}
-            title={server.name}
-            className="w-12 h-12 flex items-center justify-center text-xs font-semibold transition-all overflow-hidden flex-shrink-0 relative"
-            style={{
-              borderRadius: isActive ? '33%' : '50%',
-              background: isActive ? 'var(--dc-accent)' : 'var(--dc-sidebar)',
-              color: isActive ? 'white' : 'var(--dc-text)',
-            }}
-          >
-            {isActive && (
-              <span
-                className="absolute left-0 top-1/2 -translate-y-1/2 w-1 rounded-r"
-                style={{ height: 36, background: 'white' }}
-              />
-            )}
-            {server.icon ? (
-              <img src={server.icon} alt={server.name} className="w-full h-full object-cover" />
-            ) : (
-              initials
-            )}
-          </button>
+          <div key={server.id} className="relative group flex-shrink-0">
+            <div
+              className={`absolute left-0 top-1/2 -translate-y-1/2 w-1 rounded-r-full bg-white transition-all ${selected ? 'h-10' : 'h-5 opacity-0 group-hover:opacity-100'}`}
+            />
+            <button
+              onClick={() => onSelect(server)}
+              title={server.name}
+              className={`w-12 h-12 rounded-[50%] group-hover:rounded-[30%] transition-all duration-200 flex items-center justify-center text-white font-bold text-sm overflow-hidden ${selected ? 'rounded-[30%] bg-[#7289da]' : 'bg-[#36393f]'}`}
+            >
+              {server.icon ? (
+                <img src={server.icon} alt={server.name} className="w-full h-full object-cover" />
+              ) : (
+                initials
+              )}
+            </button>
+          </div>
         );
       })}
-    </nav>
+
+      <div className="w-8 h-[2px] bg-[#36393f] rounded-full my-1" />
+
+      <div className="relative group flex-shrink-0">
+        <button
+          onClick={onAddServer}
+          title="Create a Server"
+          className="w-12 h-12 rounded-[50%] group-hover:rounded-[30%] transition-all duration-200 bg-[#36393f] hover:bg-[#3ba55c] flex items-center justify-center text-[#3ba55c] hover:text-white text-2xl font-light"
+        >
+          +
+        </button>
+      </div>
+
+      <div className="relative group flex-shrink-0">
+        <button
+          onClick={onJoinServer}
+          title="Join a Server"
+          className="w-12 h-12 rounded-[50%] group-hover:rounded-[30%] transition-all duration-200 bg-[#36393f] hover:bg-[#7289da] flex items-center justify-center text-[#7289da] hover:text-white text-xl"
+        >
+          ↗
+        </button>
+      </div>
+    </div>
   );
 }

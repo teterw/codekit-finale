@@ -34,13 +34,9 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       return errorResponse('Access denied', 403);
     }
 
-    const [created] = await db
-      .insert(channels)
-      .values({ serverId, name, type })
-      .returning();
-
+    const [created] = await db.insert(channels).values({ serverId, name, type }).returning();
     return jsonResponse({ channel: created });
-  } catch (error) {
+  } catch {
     return errorResponse('Unable to create channel', 500);
   }
 }

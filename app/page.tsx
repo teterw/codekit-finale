@@ -1,9 +1,5 @@
-import { redirect } from 'next/navigation';
-import { getServerSession } from 'next-auth';
-import { authOptions } from '@/lib/auth';
+import MainApp from '@/components/MainApp';
 
-export default async function Home() {
-  const session = await getServerSession(authOptions);
-  if (session) redirect('/channels');
-  else redirect('/login');
+export default function Home() {
+  return <MainApp />;
 }

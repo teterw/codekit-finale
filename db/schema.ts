@@ -8,9 +8,9 @@ export const users = pgTable('users', {
   avatar: text('avatar'),
   status: text('status').notNull().default('offline'),
   createdAt: timestamp('created_at').notNull().defaultNow(),
-}, (users) => ({
-  uniqueEmail: uniqueIndex('users_email_unique').on(users.email),
-}));
+}, (t) => [
+  uniqueIndex('users_email_unique').on(t.email),
+]);
 
 export const servers = pgTable('servers', {
   id: serial('id').primaryKey(),
@@ -42,9 +42,9 @@ export const members = pgTable('members', {
   serverId: integer('server_id').notNull(),
   role: text('role').notNull().default('member'),
   joinedAt: timestamp('joined_at').notNull().defaultNow(),
-}, (members) => ({
-  pk: primaryKey(members.userId, members.serverId),
-}));
+}, (t) => [
+  primaryKey({ columns: [t.userId, t.serverId] }),
+]);
 
 export const invites = pgTable('invites', {
   id: serial('id').primaryKey(),
@@ -52,6 +52,16 @@ export const invites = pgTable('invites', {
   code: text('code').notNull(),
   createdAt: timestamp('created_at').notNull().defaultNow(),
   expiresAt: timestamp('expires_at').notNull(),
-}, (invites) => ({
-  uniqueCode: uniqueIndex('invites_code_unique').on(invites.code),
-}));
+}, (t) => [
+  uniqueIndex('invites_code_unique').on(t.code),
+]);
+
+export const voiceParticipants = pgTable('voice_participants', {
+  id: serial('id').primaryKey(),
+  channelId: integer('channel_id').notNull(),
+  userId: integer('user_id').notNull(),
+  peerId: text('peer_id').notNull(),
+  updatedAt: timestamp('updated_at').notNull().defaultNow(),
+}, (t) => [
+  uniqueIndex('voice_participants_channel_user').on(t.channelId, t.userId),
+]);

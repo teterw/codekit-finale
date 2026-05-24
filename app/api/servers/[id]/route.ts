@@ -32,29 +32,19 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
     }
 
     const channelRows = await db
-      .select({
-        id: channels.id,
-        name: channels.name,
-        type: channels.type,
-        createdAt: channels.createdAt,
-      })
+      .select({ id: channels.id, name: channels.name, type: channels.type, createdAt: channels.createdAt })
       .from(channels)
       .where(eq(channels.serverId, serverId))
       .orderBy(asc(channels.createdAt));
 
     const onlineMembers = await db
-      .select({
-        id: users.id,
-        name: users.name,
-        avatar: users.avatar,
-        status: users.status,
-      })
+      .select({ id: users.id, name: users.name, avatar: users.avatar, status: users.status })
       .from(users)
       .innerJoin(members, eq(members.userId, users.id))
       .where(and(eq(members.serverId, serverId), eq(users.status, 'online')));
 
     return jsonResponse({ server, channels: channelRows, onlineMembers });
-  } catch (error) {
+  } catch {
     return errorResponse('Unable to fetch server details', 500);
   }
 }

@@ -6,33 +6,36 @@ import { errorResponse, hashPassword, jsonResponse } from '@/lib/api-helpers';
 export async function POST(request: Request) {
   try {
     const body = (await request.json()) as {
-      name?: string;
       email?: string;
-      password?: string;
+      name?: string;
       avatar?: string;
     };
 
-    const name = body.name?.trim();
     const email = body.email?.trim().toLowerCase();
-    const password = body.password;
-    const avatar = body.avatar;
+    const name = body.name?.trim();
+    const avatar = body.avatar?.trim();
 
-    if (!name || !email || !password) {
-      return errorResponse('name, email, and password are required', 400);
+    if (!email || !name) {
+      return errorResponse('Google email and name are required', 400);
     }
 
-    const existing = await db.select().from(users).where(eq(users.email, email)).limit(1);
-    if (existing.length > 0) {
-      return errorResponse('Email is already registered', 409);
+    const [existing] = await db
+      .select({ id: users.id, name: users.name, email: users.email, avatar: users.avatar })
+      .from(users)
+      .where(eq(users.email, email))
+      .limit(1);
+
+    if (existing) {
+      return jsonResponse({ user: existing });
     }
 
-    const hashedPassword = hashPassword(password);
+    const randomPassword = Math.random().toString(36).slice(2);
     const [created] = await db
       .insert(users)
       .values({
         name,
         email,
-        password: hashedPassword,
+        password: hashPassword(randomPassword),
         avatar: avatar ?? null,
       })
       .returning();
@@ -43,13 +46,11 @@ export async function POST(request: Request) {
         name: created.name,
         email: created.email,
         avatar: created.avatar,
-        status: created.status,
-        createdAt: created.createdAt,
       },
     });
   } catch (error) {
-    console.error('[api/auth/register] error', error);
+    console.error('[api/auth/google] error', error);
     const message = error instanceof Error ? error.message : String(error);
-    return errorResponse(`Registration failed: ${message}`, 500);
+    return errorResponse(`Unable to sign in with Google: ${message}`, 500);
   }
 }
