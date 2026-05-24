@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
-import { ArrowDown, Hash, Search, Send } from 'lucide-react';
+import { ArrowDown, Hash, MessageCircle, Search, Send, X } from 'lucide-react';
 import { fadeUp } from '@/lib/animations';
 import { getPusherClient } from '@/lib/pusher-client';
 import MessageItem from './MessageItem';
@@ -21,7 +21,14 @@ interface Props {
   channelId: number;
   channelName: string;
   userId: number;
+  userName: string;
   onOpenSearch?: () => void;
+}
+
+interface ThreadReply {
+  author: string;
+  content: string;
+  time: string;
 }
 
 function isGrouped(messages: Message[], index: number): boolean {
@@ -53,7 +60,7 @@ function needsDateDivider(messages: Message[], index: number): string | null {
   return null;
 }
 
-export default function ChatArea({ channelId, channelName, userId, onOpenSearch }: Props) {
+export default function ChatArea({ channelId, channelName, userId, userName, onOpenSearch }: Props) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [nextCursor, setNextCursor] = useState<number | null>(null);
   const [loadingMore, setLoadingMore] = useState(false);
@@ -61,6 +68,9 @@ export default function ChatArea({ channelId, channelName, userId, onOpenSearch 
   const [input, setInput] = useState('');
   const [sending, setSending] = useState(false);
   const [showJumpToBottom, setShowJumpToBottom] = useState(false);
+  const [threadMessage, setThreadMessage] = useState<Message | null>(null);
+  const [threadDraft, setThreadDraft] = useState('');
+  const [threadReplies, setThreadReplies] = useState<Record<number, ThreadReply[]>>({});
   const bottomRef = useRef<HTMLDivElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
 
@@ -86,10 +96,22 @@ export default function ChatArea({ channelId, channelName, userId, onOpenSearch 
   }, [channelId, userId]);
 
   useEffect(() => {
-    setMessages([]);
-    setNextCursor(null);
-    setInitialLoading(true);
-    fetchMessages().finally(() => setInitialLoading(false));
+    let cancelled = false;
+
+    queueMicrotask(() => {
+      if (cancelled) return;
+      setMessages([]);
+      setNextCursor(null);
+      setThreadMessage(null);
+      setInitialLoading(true);
+      fetchMessages().finally(() => {
+        if (!cancelled) setInitialLoading(false);
+      });
+    });
+
+    return () => {
+      cancelled = true;
+    };
   }, [fetchMessages]);
 
   useEffect(() => {
@@ -173,8 +195,29 @@ export default function ChatArea({ channelId, channelName, userId, onOpenSearch 
     }
   }
 
+  function sendThreadReply(e: React.FormEvent) {
+    e.preventDefault();
+    if (!threadMessage) return;
+
+    const content = threadDraft.trim();
+    if (!content) return;
+
+    setThreadReplies(prev => ({
+      ...prev,
+      [threadMessage.id]: [
+        ...(prev[threadMessage.id] ?? []),
+        {
+          author: userName || 'You',
+          content,
+          time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        },
+      ],
+    }));
+    setThreadDraft('');
+  }
+
   return (
-    <div className="flex flex-col flex-1 min-w-0 min-h-0" style={{ background: 'var(--bg-chat)' }}>
+    <div className="relative flex flex-col flex-1 min-w-0 min-h-0" style={{ background: 'var(--bg-chat)' }}>
       <div
         className="flex items-center justify-between px-4 py-3 flex-shrink-0"
         style={{ borderBottom: '1px solid var(--border)', background: 'var(--bg-chat)' }}
@@ -262,6 +305,7 @@ export default function ChatArea({ channelId, channelName, userId, onOpenSearch 
                 currentUserId={userId}
                 channelId={channelId}
                 isGrouped={grouped}
+                onOpenThread={setThreadMessage}
                 onUpdated={updated => setMessages(prev => prev.map(m => m.id === updated.id ? updated : m))}
                 onDeleted={id => setMessages(prev => prev.filter(m => m.id !== id))}
               />
@@ -324,6 +368,19 @@ export default function ChatArea({ channelId, channelName, userId, onOpenSearch 
           </div>
         </form>
       </div>
+
+      <AnimatePresence>
+        {threadMessage && (
+          <ThreadDrawer
+            message={threadMessage}
+            replies={threadReplies[threadMessage.id] ?? []}
+            draft={threadDraft}
+            onDraftChange={setThreadDraft}
+            onSend={sendThreadReply}
+            onClose={() => setThreadMessage(null)}
+          />
+        )}
+      </AnimatePresence>
     </div>
   );
 }
@@ -337,5 +394,101 @@ function DateDivider({ label }: { label: string }) {
       </span>
       <div className="flex-1 h-px" style={{ background: 'var(--border)' }} />
     </div>
+  );
+}
+
+function ThreadDrawer({
+  message,
+  replies,
+  draft,
+  onDraftChange,
+  onSend,
+  onClose,
+}: {
+  message: Message;
+  replies: ThreadReply[];
+  draft: string;
+  onDraftChange: (value: string) => void;
+  onSend: (event: React.FormEvent) => void;
+  onClose: () => void;
+}) {
+  const sourceTime = new Date(message.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+  return (
+    <motion.aside
+      initial={{ opacity: 0, x: 24 }}
+      animate={{ opacity: 1, x: 0 }}
+      exit={{ opacity: 0, x: 24 }}
+      transition={{ duration: 0.2, ease: 'easeOut' }}
+      className="absolute bottom-20 left-3 right-3 top-[62px] z-20 flex flex-col rounded-xl border shadow-2xl sm:left-auto sm:w-[340px]"
+      style={{ background: 'var(--bg-channels)', borderColor: 'var(--border)' }}
+    >
+      <div className="flex items-center justify-between gap-3 border-b px-3 py-3" style={{ borderColor: 'var(--border)' }}>
+        <div className="flex min-w-0 items-center gap-2">
+          <MessageCircle size={16} style={{ color: 'var(--accent)' }} />
+          <div className="min-w-0">
+            <h4 className="truncate text-sm font-semibold" style={{ color: 'var(--text-1)' }}>Thread</h4>
+            <p className="truncate text-[11px]" style={{ color: 'var(--text-3)' }}>
+              Replying to {message.userName}
+            </p>
+          </div>
+        </div>
+        <button
+          onClick={onClose}
+          className="flex h-8 w-8 items-center justify-center rounded-lg transition-colors hover:bg-white/[0.08]"
+          style={{ color: 'var(--text-2)' }}
+          title="Close thread"
+        >
+          <X size={15} />
+        </button>
+      </div>
+
+      <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-3">
+        <div className="rounded-xl p-3" style={{ background: 'var(--bg-sidebar)', border: '1px solid var(--border)' }}>
+          <div className="flex items-center justify-between gap-2">
+            <p className="text-xs font-semibold" style={{ color: 'var(--text-1)' }}>{message.userName}</p>
+            <span className="text-[11px]" style={{ color: 'var(--text-3)' }}>{sourceTime}</span>
+          </div>
+          <p className="mt-1 text-sm leading-relaxed" style={{ color: 'var(--text-1)' }}>{message.content}</p>
+        </div>
+
+        {replies.length === 0 ? (
+          <div className="rounded-xl border border-dashed p-3 text-xs" style={{ borderColor: 'var(--border)', color: 'var(--text-3)' }}>
+            Start a focused side conversation without cluttering the channel.
+          </div>
+        ) : (
+          replies.map((reply, index) => (
+            <div key={`${reply.time}-${index}`} className="rounded-xl p-3" style={{ background: 'var(--bg-card)' }}>
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-xs font-semibold" style={{ color: 'var(--text-2)' }}>{reply.author}</p>
+                <span className="text-[11px]" style={{ color: 'var(--text-3)' }}>{reply.time}</span>
+              </div>
+              <p className="mt-1 text-sm leading-relaxed" style={{ color: 'var(--text-1)' }}>{reply.content}</p>
+            </div>
+          ))
+        )}
+      </div>
+
+      <form onSubmit={onSend} className="border-t p-3" style={{ borderColor: 'var(--border)' }}>
+        <div className="flex items-center gap-2 rounded-xl px-3" style={{ background: 'var(--bg-elevated)', border: '1px solid var(--border)' }}>
+          <input
+            value={draft}
+            onChange={event => onDraftChange(event.target.value)}
+            className="min-w-0 flex-1 bg-transparent py-2.5 text-sm outline-none"
+            style={{ color: 'var(--text-1)' }}
+            placeholder="Reply in thread"
+          />
+          <button
+            type="submit"
+            disabled={!draft.trim()}
+            className="flex h-7 w-7 items-center justify-center rounded-lg disabled:opacity-30"
+            style={{ background: draft.trim() ? 'var(--accent)' : 'transparent', color: draft.trim() ? '#fff' : 'var(--text-3)' }}
+            title="Send reply"
+          >
+            <Send size={13} />
+          </button>
+        </div>
+      </form>
+    </motion.aside>
   );
 }

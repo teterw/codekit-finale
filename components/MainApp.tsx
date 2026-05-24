@@ -7,6 +7,7 @@ import ServerSidebar from './ServerSidebar';
 import ChannelSidebar from './ChannelSidebar';
 import ChatArea from './ChatArea';
 import VoiceChannel from './VoiceChannel';
+import FeatureHub from './FeatureHub';
 import InviteModal from './InviteModal';
 import SearchModal from './SearchModal';
 import CreateServerModal from './CreateServerModal';
@@ -29,10 +30,19 @@ export default function MainApp() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const id = localStorage.getItem('userId');
-    const name = localStorage.getItem('userName');
-    if (id && name) { setUserId(Number(id)); setUserName(name); }
-    setLoading(false);
+    let cancelled = false;
+
+    queueMicrotask(() => {
+      if (cancelled) return;
+      const id = localStorage.getItem('userId');
+      const name = localStorage.getItem('userName');
+      if (id && name) { setUserId(Number(id)); setUserName(name); }
+      setLoading(false);
+    });
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   const fetchServers = useCallback(async (uid: number) => {
@@ -56,12 +66,20 @@ export default function MainApp() {
 
   useEffect(() => {
     if (!userId) return;
-    fetchServers(userId).then(list => {
+    let cancelled = false;
+
+    queueMicrotask(async () => {
+      const list = await fetchServers(userId);
+      if (cancelled) return;
       if (list && list.length > 0) {
         setSelectedServer(list[0]);
         fetchServerDetails(userId, list[0].id);
       }
     });
+
+    return () => {
+      cancelled = true;
+    };
   }, [userId, fetchServers, fetchServerDetails]);
 
   function handleAuth(uid: number, name: string) {
@@ -318,12 +336,20 @@ export default function MainApp() {
                 channelId={selectedChannel.id}
                 channelName={selectedChannel.name}
                 userId={userId}
+                userName={userName}
                 onOpenSearch={() => setShowSearchModal(true)}
               />
             </motion.div>
           )}
         </AnimatePresence>
       </main>
+
+      <FeatureHub
+        server={selectedServer}
+        activeChannel={selectedChannel}
+        userId={userId}
+        userName={userName}
+      />
 
       {/* Modals */}
       <AnimatePresence>
