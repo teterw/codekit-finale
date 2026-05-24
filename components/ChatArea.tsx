@@ -165,8 +165,8 @@ export default function ChatArea({ channelId, channelName, userId, userName, onO
       channel.bind('message-deleted', ({ id }: { id: number }) => {
         setMessages(prev => prev.filter(m => m.id !== id));
       });
-      channel.bind('reaction-updated', ({ messageId, reactions }: { messageId: number; reactions: Reaction[] }) => {
-        setReactionsMap(prev => ({ ...prev, [messageId]: reactions }));
+      channel.bind('reaction-updated', ({ messageId }: { messageId: number }) => {
+        fetchReactions([messageId]);
       });
       channel.bind('typing-start', ({ userId: tid, userName: typerName }: { userId: number; userName: string }) => {
         if (tid !== userId) setTypers(prev => new Map(prev).set(tid, typerName));
@@ -332,14 +332,12 @@ export default function ChatArea({ channelId, channelName, userId, userName, onO
     });
 
     try {
-      console.log('[reaction] sending', { messageId, channelId, emoji, userId });
       const res = await fetch('/api/reactions', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'x-user-id': String(userId) },
         body: JSON.stringify({ messageId, channelId, emoji }),
       });
       const text = await res.text();
-      console.log('[reaction] response', res.status, text);
       if (res.ok) {
         const data = JSON.parse(text);
         setReactionsMap(prev => ({ ...prev, [messageId]: data.reactions }));
