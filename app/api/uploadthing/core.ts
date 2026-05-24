@@ -15,7 +15,7 @@ export const ourFileRouter = {
       return { userId };
     })
     .onUploadComplete(async ({ metadata, file }) => {
-      const url = file.url;
+      const url = file.ufsUrl;
       await db.update(users).set({ avatar: url, updatedAt: new Date() }).where(eq(users.id, metadata.userId));
       try {
         await getPusherServer().trigger(`user-${metadata.userId}`, 'profile-updated', { avatar: url });
