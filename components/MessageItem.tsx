@@ -6,7 +6,16 @@ import { Check, MessageCircle, Pencil, Pin, Reply, SmilePlus, Trash2, X } from '
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 
-const EMOJIS = ['👍', '❤️', '😂', '😮', '😢', '🎉', '🔥', '😡'];
+const EMOJIS = [
+  '\u{1F44D}',
+  '\u2764\uFE0F',
+  '\u{1F602}',
+  '\u{1F62E}',
+  '\u{1F622}',
+  '\u{1F389}',
+  '\u{1F525}',
+  '\u{1F621}',
+];
 
 interface Reaction { emoji: string; count: number; userReacted: boolean; }
 

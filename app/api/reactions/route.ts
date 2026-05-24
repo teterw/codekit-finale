@@ -4,7 +4,16 @@ import { and, eq, inArray } from 'drizzle-orm';
 import { errorResponse, getUserId, jsonResponse } from '@/lib/api-helpers';
 import { getPusherServer } from '@/lib/pusher';
 
-const ALLOWED_EMOJIS = new Set(['👍', '❤️', '😂', '😮', '😢', '🎉', '🔥', '😡']);
+const ALLOWED_EMOJIS = new Set([
+  '\u{1F44D}',
+  '\u2764\uFE0F',
+  '\u{1F602}',
+  '\u{1F62E}',
+  '\u{1F622}',
+  '\u{1F389}',
+  '\u{1F525}',
+  '\u{1F621}',
+]);
 
 type ReactionSummary = { emoji: string; count: number; userReacted: boolean };
 
@@ -16,7 +25,7 @@ function summarizeReactions(
 
   for (const row of rows) {
     if (!result[row.messageId]) result[row.messageId] = [];
-    const existing = result[row.messageId].find(r => r.emoji === row.emoji);
+    const existing = result[row.messageId].find(reaction => reaction.emoji === row.emoji);
     if (existing) {
       existing.count += 1;
       if (row.userId === userId) existing.userReacted = true;
@@ -43,7 +52,7 @@ export async function GET(request: Request) {
     const messageIds = (url.searchParams.get('messageIds') ?? '')
       .split(',')
       .map(Number)
-      .filter(n => !Number.isNaN(n) && n > 0);
+      .filter(id => Number.isInteger(id) && id > 0);
 
     if (!messageIds.length) return jsonResponse({ reactions: {} });
 
@@ -67,9 +76,11 @@ export async function POST(request: Request) {
     await ensureFeatureColumns();
 
     const body = (await request.json()) as { messageId?: number; channelId?: number; emoji?: string };
-    const { messageId, channelId, emoji } = body;
+    const messageId = Number(body.messageId);
+    const channelId = Number(body.channelId);
+    const emoji = body.emoji;
 
-    if (!messageId || !channelId || !emoji) {
+    if (!Number.isInteger(messageId) || !Number.isInteger(channelId) || !emoji) {
       return errorResponse('messageId, channelId, emoji required', 400);
     }
 
@@ -101,7 +112,7 @@ export async function POST(request: Request) {
     const reactions = summarizeReactions(rows, userId)[messageId] ?? [];
 
     try {
-      await getPusherServer().trigger(`channel-${channelId}`, 'reaction-updated', { messageId, reactions });
+      await getPusherServer().trigger(`channel-${channelId}`, 'reaction-updated', { messageId });
     } catch (err) {
       console.error('[reactions POST] pusher trigger failed:', err);
     }
@@ -109,6 +120,6 @@ export async function POST(request: Request) {
     return jsonResponse({ reactions });
   } catch (err) {
     console.error('[reactions POST] error:', err);
-    return errorResponse('Unable to process reaction: ' + String(err), 500);
+    return errorResponse('Unable to save reaction: ' + String(err), 500);
   }
 }
