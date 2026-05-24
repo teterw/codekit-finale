@@ -1,20 +1,9 @@
 import { db, ensureFeatureColumns } from '@/db';
 import { channels, messages, users, members } from '@/db/schema';
 import { and, desc, eq, inArray, lt } from 'drizzle-orm';
+import { sql } from 'drizzle-orm';
 import { errorResponse, getUserId, jsonResponse } from '@/lib/api-helpers';
 import { getPusherServer } from '@/lib/pusher';
-
-type BaseMessage = {
-  id: number;
-  content: string;
-  createdAt: Date;
-  updatedAt: Date;
-  userId: number;
-  userName: string;
-  userAvatar: string | null;
-  replyToId: number | null;
-  isPinned: boolean;
-};
 
 export async function GET(request: Request, { params }: { params: Promise<{ channelId: string }> }) {
   try {
@@ -25,15 +14,20 @@ export async function GET(request: Request, { params }: { params: Promise<{ chan
     const channelIdNumber = Number(channelId);
     if (Number.isNaN(channelIdNumber)) return errorResponse('Invalid channel id', 400);
 
-    const [channel] = await db.select().from(channels).where(eq(channels.id, channelIdNumber)).limit(1);
+    // Explicit minimal select — avoids schema/DB column mismatch on channels table
+    const [channel] = await db
+      .select({ id: channels.id, serverId: channels.serverId })
+      .from(channels)
+      .where(eq(channels.id, channelIdNumber))
+      .limit(1);
     if (!channel) return errorResponse('Channel not found', 404);
 
-    const membership = await db
-      .select()
+    const [membership] = await db
+      .select({ userId: members.userId })
       .from(members)
       .where(and(eq(members.userId, userId), eq(members.serverId, channel.serverId)))
       .limit(1);
-    if (membership.length === 0) return errorResponse('Access denied', 403);
+    if (!membership) return errorResponse('Access denied', 403);
 
     await ensureFeatureColumns();
 
@@ -43,10 +37,10 @@ export async function GET(request: Request, { params }: { params: Promise<{ chan
       ? and(eq(messages.channelId, channelIdNumber), lt(messages.id, Number(cursor)))
       : eq(messages.channelId, channelIdNumber);
 
-    let rows: BaseMessage[];
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let rows: any[];
 
     try {
-      // Full select including feature columns (reply_to_id, is_pinned)
       rows = await db
         .select({
           id: messages.id,
@@ -65,27 +59,35 @@ export async function GET(request: Request, { params }: { params: Promise<{ chan
         .orderBy(desc(messages.id))
         .limit(30);
     } catch {
-      // Fallback: feature columns don't exist in DB yet — select base columns only
-      const baseRows = await db
-        .select({
-          id: messages.id,
-          content: messages.content,
-          createdAt: messages.createdAt,
-          updatedAt: messages.updatedAt,
-          userId: messages.userId,
-          userName: users.name,
-          userAvatar: users.avatar,
-        })
-        .from(messages)
-        .innerJoin(users, eq(messages.userId, users.id))
-        .where(conditions)
-        .orderBy(desc(messages.id))
-        .limit(30);
-      rows = baseRows.map(r => ({ ...r, replyToId: null, isPinned: false }));
+      try {
+        // Fallback without feature columns (reply_to_id, is_pinned, updated_at)
+        const baseRows = await db
+          .select({
+            id: messages.id,
+            content: messages.content,
+            createdAt: messages.createdAt,
+            userId: messages.userId,
+            userName: users.name,
+          })
+          .from(messages)
+          .innerJoin(users, eq(messages.userId, users.id))
+          .where(conditions)
+          .orderBy(desc(messages.id))
+          .limit(30);
+        rows = baseRows.map(r => ({
+          ...r,
+          updatedAt: r.createdAt,
+          userAvatar: null,
+          replyToId: null,
+          isPinned: false,
+        }));
+      } catch (err2) {
+        console.error('[GET messages fallback2]', err2);
+        return errorResponse('Unable to fetch messages', 500);
+      }
     }
 
-    // Batch-fetch reply previews
-    const replyIds = rows.map(r => r.replyToId).filter((id): id is number => id != null);
+    const replyIds = rows.map((r: { replyToId?: number | null }) => r.replyToId).filter((id: unknown): id is number => typeof id === 'number');
     const replyMap = new Map<number, { content: string; userName: string }>();
     if (replyIds.length > 0) {
       try {
@@ -98,16 +100,18 @@ export async function GET(request: Request, { params }: { params: Promise<{ chan
       } catch { /* ignore */ }
     }
 
-    const enriched = rows.map(r => ({
+    const enriched = rows.map((r: { replyToId?: number | null; [k: string]: unknown }) => ({
       ...r,
-      replyToContent: r.replyToId ? (replyMap.get(r.replyToId)?.content ?? null) : null,
-      replyToUserName: r.replyToId ? (replyMap.get(r.replyToId)?.userName ?? null) : null,
+      replyToContent: r.replyToId ? (replyMap.get(r.replyToId as number)?.content ?? null) : null,
+      replyToUserName: r.replyToId ? (replyMap.get(r.replyToId as number)?.userName ?? null) : null,
     }));
 
     const nextCursor = rows.length > 0 ? rows[rows.length - 1].id : null;
     return jsonResponse({ messages: enriched, nextCursor });
-  } catch {
-    return errorResponse('Unable to fetch messages', 500);
+  } catch (err) {
+    const detail = err instanceof Error ? err.message : String(err);
+    console.error('[GET messages outer]', detail);
+    return errorResponse(`Unable to fetch messages: ${detail}`, 500);
   }
 }
 
@@ -124,23 +128,44 @@ export async function POST(request: Request, { params }: { params: Promise<{ cha
     const content = body.content?.trim();
     if (!content) return errorResponse('Message content is required', 400);
 
-    const [channel] = await db.select().from(channels).where(eq(channels.id, channelIdNumber)).limit(1);
+    // Explicit minimal select — avoids schema/DB column mismatch
+    const [channel] = await db
+      .select({ id: channels.id, serverId: channels.serverId })
+      .from(channels)
+      .where(eq(channels.id, channelIdNumber))
+      .limit(1);
     if (!channel) return errorResponse('Channel not found', 404);
 
-    const membership = await db
-      .select()
+    const [membership] = await db
+      .select({ userId: members.userId })
       .from(members)
       .where(and(eq(members.userId, userId), eq(members.serverId, channel.serverId)))
       .limit(1);
-    if (membership.length === 0) return errorResponse('Access denied', 403);
+    if (!membership) return errorResponse('Access denied', 403);
 
     await ensureFeatureColumns();
 
-    const [sender] = await db
-      .select({ name: users.name, avatar: users.avatar })
-      .from(users)
-      .where(eq(users.id, userId))
-      .limit(1);
+    // Fetch sender name — fall back gracefully if avatar column doesn't exist
+    let senderName = 'Unknown';
+    let senderAvatar: string | null = null;
+    try {
+      const [s] = await db
+        .select({ name: users.name, avatar: users.avatar })
+        .from(users)
+        .where(eq(users.id, userId))
+        .limit(1);
+      senderName = s?.name ?? 'Unknown';
+      senderAvatar = s?.avatar ?? null;
+    } catch {
+      try {
+        const [s] = await db
+          .select({ name: users.name })
+          .from(users)
+          .where(eq(users.id, userId))
+          .limit(1);
+        senderName = s?.name ?? 'Unknown';
+      } catch { /* ignore */ }
+    }
 
     const replyToId = body.replyToId ?? null;
     let replyToContent: string | null = null;
@@ -159,34 +184,49 @@ export async function POST(request: Request, { params }: { params: Promise<{ cha
     }
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    let created: any;
+    let savedId: number;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let savedCreatedAt: Date = new Date();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let savedUpdatedAt: Date = savedCreatedAt;
 
     try {
-      // Try insert with all feature columns (reply_to_id, is_pinned)
+      // Attempt 1: full insert with all feature columns, return all columns
       const insertVals: Record<string, unknown> = { channelId: channelIdNumber, userId, content };
       if (replyToId) insertVals.replyToId = replyToId;
-      [created] = await db.insert(messages).values(insertVals as never).returning();
+      const [row] = await db.insert(messages).values(insertVals as never).returning();
+      savedId = row.id;
+      savedCreatedAt = row.createdAt as Date;
+      savedUpdatedAt = (row.updatedAt as Date | undefined) ?? savedCreatedAt;
     } catch {
-      // Fallback: feature columns don't exist in DB yet
-      [created] = await db
-        .insert(messages)
-        .values({ channelId: channelIdNumber, userId, content })
-        .returning({
-          id: messages.id,
-          channelId: messages.channelId,
-          userId: messages.userId,
-          content: messages.content,
-          createdAt: messages.createdAt,
-          updatedAt: messages.updatedAt,
-        });
+      try {
+        // Attempt 2: minimal insert, return only id
+        const [row] = await db
+          .insert(messages)
+          .values({ channelId: channelIdNumber, userId, content })
+          .returning({ id: messages.id });
+        savedId = row.id;
+      } catch (err2) {
+        // Attempt 3: raw SQL to bypass all Drizzle schema mapping
+        const result = await db.execute(
+          sql`INSERT INTO messages (channel_id, user_id, content) VALUES (${channelIdNumber}, ${userId}, ${content}) RETURNING id`
+        );
+        const raw = result.rows[0] as { id: number };
+        savedId = raw.id;
+      }
     }
 
     const fullMessage = {
-      ...created,
-      isPinned: created.isPinned ?? false,
-      replyToId: replyToId ?? created.replyToId ?? null,
-      userName: sender?.name ?? 'Unknown',
-      userAvatar: sender?.avatar ?? null,
+      id: savedId!,
+      channelId: channelIdNumber,
+      userId,
+      content,
+      isPinned: false,
+      replyToId,
+      createdAt: savedCreatedAt,
+      updatedAt: savedUpdatedAt,
+      userName: senderName,
+      userAvatar: senderAvatar,
       replyToContent,
       replyToUserName,
     };
@@ -196,7 +236,9 @@ export async function POST(request: Request, { params }: { params: Promise<{ cha
     } catch { /* Pusher not configured */ }
 
     return jsonResponse({ message: fullMessage }, 201);
-  } catch {
-    return errorResponse('Unable to create message', 500);
+  } catch (err) {
+    const detail = err instanceof Error ? err.message : String(err);
+    console.error('[POST messages]', detail);
+    return errorResponse(`Unable to create message: ${detail}`, 500);
   }
 }
