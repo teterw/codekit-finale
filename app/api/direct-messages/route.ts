@@ -3,36 +3,42 @@ import { directConversations, directConversationMembers, directMessages, users }
 import { and, eq, inArray, sql } from 'drizzle-orm';
 import { errorResponse, getUserId, jsonResponse } from '@/lib/api-helpers';
 
-export async function ensureDmTables() {
-  try {
-    await db.execute(sql`
-      CREATE TABLE IF NOT EXISTS direct_conversations (
-        id SERIAL PRIMARY KEY,
-        name TEXT,
-        type TEXT NOT NULL DEFAULT 'dm',
-        owner_id INTEGER NOT NULL,
-        created_at TIMESTAMP NOT NULL DEFAULT NOW()
-      )
-    `);
-    await db.execute(sql`
-      CREATE TABLE IF NOT EXISTS direct_conversation_members (
-        conversation_id INTEGER NOT NULL,
-        user_id INTEGER NOT NULL,
-        joined_at TIMESTAMP NOT NULL DEFAULT NOW(),
-        PRIMARY KEY (conversation_id, user_id)
-      )
-    `);
-    await db.execute(sql`
-      CREATE TABLE IF NOT EXISTS direct_messages (
-        id SERIAL PRIMARY KEY,
-        conversation_id INTEGER NOT NULL,
-        user_id INTEGER NOT NULL,
-        content TEXT NOT NULL,
-        created_at TIMESTAMP NOT NULL DEFAULT NOW(),
-        updated_at TIMESTAMP NOT NULL DEFAULT NOW()
-      )
-    `);
-  } catch { /* tables already exist or no DDL permission */ }
+let _dmTables: Promise<void> | null = null;
+
+export function ensureDmTables(): Promise<void> {
+  if (_dmTables) return _dmTables;
+  _dmTables = (async () => {
+    try {
+      await db.execute(sql`
+        CREATE TABLE IF NOT EXISTS direct_conversations (
+          id SERIAL PRIMARY KEY,
+          name TEXT,
+          type TEXT NOT NULL DEFAULT 'dm',
+          owner_id INTEGER NOT NULL,
+          created_at TIMESTAMP NOT NULL DEFAULT NOW()
+        )
+      `);
+      await db.execute(sql`
+        CREATE TABLE IF NOT EXISTS direct_conversation_members (
+          conversation_id INTEGER NOT NULL,
+          user_id INTEGER NOT NULL,
+          joined_at TIMESTAMP NOT NULL DEFAULT NOW(),
+          PRIMARY KEY (conversation_id, user_id)
+        )
+      `);
+      await db.execute(sql`
+        CREATE TABLE IF NOT EXISTS direct_messages (
+          id SERIAL PRIMARY KEY,
+          conversation_id INTEGER NOT NULL,
+          user_id INTEGER NOT NULL,
+          content TEXT NOT NULL,
+          created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+          updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+        )
+      `);
+    } catch { /* tables already exist or no DDL permission */ }
+  })();
+  return _dmTables;
 }
 
 export async function GET(request: Request) {

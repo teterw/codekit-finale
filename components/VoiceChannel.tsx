@@ -48,11 +48,82 @@ export default function VoiceChannel({ channelId, channelName, userId, userName 
   const peerRef = useRef<import('peerjs').Peer | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const screenStreamRef = useRef<MediaStream | null>(null);
+  const outgoingStreamRef = useRef<MediaStream | null>(null);
   const callsRef = useRef<Map<string, import('peerjs').MediaConnection>>(new Map());
   const audioRefs = useRef<Map<string, HTMLAudioElement>>(new Map());
   const animFrameRef = useRef<number>(0);
   const speakTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const myPeerIdRef = useRef<string>('');
+
+  // WebAudio graph used to apply a live effect to the outgoing voice.
+  const fxCtxRef = useRef<AudioContext | null>(null);
+  const fxSourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
+  const fxDestRef = useRef<MediaStreamAudioDestinationNode | null>(null);
+  const fxNodesRef = useRef<AudioNode[]>([]);
+
+  // Route the raw mic through a WebAudio graph and return a processed track so
+  // peers hear the selected effect. Falls back to the raw track on failure.
+  function buildVoicePipeline(micTrack: MediaStreamTrack): MediaStreamTrack {
+    try {
+      const Ctor = window.AudioContext ?? (window as typeof window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+      if (!Ctor) return micTrack;
+      const ctx = new Ctor();
+      const source = ctx.createMediaStreamSource(new MediaStream([micTrack]));
+      const dest = ctx.createMediaStreamDestination();
+      fxCtxRef.current = ctx;
+      fxSourceRef.current = source;
+      fxDestRef.current = dest;
+      ctx.resume().catch(() => {});
+      applyVoiceEffect(voiceEffect);
+      return dest.stream.getAudioTracks()[0] ?? micTrack;
+    } catch {
+      return micTrack;
+    }
+  }
+
+  function applyVoiceEffect(effect: string) {
+    const ctx = fxCtxRef.current;
+    const source = fxSourceRef.current;
+    const dest = fxDestRef.current;
+    if (!ctx || !source || !dest) return;
+
+    try { source.disconnect(); } catch { /* not connected */ }
+    fxNodesRef.current.forEach(n => { try { n.disconnect(); } catch { /* ignore */ } });
+    fxNodesRef.current = [];
+
+    if (effect === 'Radio') {
+      const bandpass = ctx.createBiquadFilter();
+      bandpass.type = 'bandpass';
+      bandpass.frequency.value = 1800;
+      bandpass.Q.value = 1.4;
+      const boost = ctx.createGain();
+      boost.gain.value = 1.6;
+      source.connect(bandpass);
+      bandpass.connect(boost);
+      boost.connect(dest);
+      fxNodesRef.current = [bandpass, boost];
+    } else if (effect === 'Deep') {
+      const lowShelf = ctx.createBiquadFilter();
+      lowShelf.type = 'lowshelf';
+      lowShelf.frequency.value = 220;
+      lowShelf.gain.value = 14;
+      const lowPass = ctx.createBiquadFilter();
+      lowPass.type = 'lowpass';
+      lowPass.frequency.value = 2200;
+      source.connect(lowShelf);
+      lowShelf.connect(lowPass);
+      lowPass.connect(dest);
+      fxNodesRef.current = [lowShelf, lowPass];
+    } else {
+      // Clean — straight passthrough.
+      source.connect(dest);
+    }
+  }
+
+  function changeVoiceEffect(effect: string) {
+    setVoiceEffect(effect);
+    applyVoiceEffect(effect);
+  }
 
   function handleRemoteStream(stream: MediaStream, peerId: string) {
     dbg(`remote stream — peerId: ${peerId} | tracks: ${stream.getTracks().length} | deafened: ${deafened}`);
@@ -132,6 +203,17 @@ export default function VoiceChannel({ channelId, channelName, userId, userName 
       dbg(`media ready — track label: ${stream.getAudioTracks()[0]?.label ?? 'none'}`);
       setupVoiceActivity(stream);
 
+      // Build the stream we actually send to peers: processed (effect) audio
+      // plus the camera video track. Muting still works because it disables the
+      // raw mic track that feeds the effect graph, silencing the processed output.
+      const micTrack = stream.getAudioTracks()[0];
+      const processedAudio = micTrack ? buildVoicePipeline(micTrack) : null;
+      const outgoing = new MediaStream();
+      if (processedAudio) outgoing.addTrack(processedAudio);
+      const camTrack = stream.getVideoTracks()[0];
+      if (camTrack) outgoing.addTrack(camTrack);
+      outgoingStreamRef.current = outgoing;
+
       dbg('creating PeerJS peer…');
       const { Peer } = await import('peerjs');
       const peer = new Peer();
@@ -158,9 +240,10 @@ export default function VoiceChannel({ channelId, channelName, userId, userName 
         setJoined(true);
         setConnecting(false);
 
+        const outStream = outgoingStreamRef.current ?? stream;
         for (const p of others) {
           dbg(`calling peer ${p.peerId?.slice(0, 8)}… (userId ${p.userId})`);
-          const call = peer.call(p.peerId, stream);
+          const call = peer.call(p.peerId, outStream);
           if (!call) {
             dbg(`ERROR — peer.call returned null for peerId ${p.peerId?.slice(0, 8)}`);
           } else {
@@ -176,7 +259,7 @@ export default function VoiceChannel({ channelId, channelName, userId, userName 
 
         peer.on('call', call => {
           dbg(`incoming call from peer ${call.peer?.slice(0, 8)}`);
-          call.answer(stream);
+          call.answer(outgoingStreamRef.current ?? stream);
           callsRef.current.set(call.peer, call);
           dbg(`answered call from ${call.peer?.slice(0, 8)}`);
           call.on('stream', remote => {
@@ -214,6 +297,12 @@ export default function VoiceChannel({ channelId, channelName, userId, userName 
     callsRef.current.clear();
     audioRefs.current.forEach(a => { a.srcObject = null; });
     audioRefs.current.clear();
+    fxCtxRef.current?.close().catch(() => {});
+    fxCtxRef.current = null;
+    fxSourceRef.current = null;
+    fxDestRef.current = null;
+    fxNodesRef.current = [];
+    outgoingStreamRef.current = null;
     await fetch(`/api/voice/${channelId}`, {
       method: 'DELETE',
       headers: { 'x-user-id': String(userId) },
@@ -339,7 +428,8 @@ export default function VoiceChannel({ channelId, channelName, userId, userName 
     }
   }
 
-  function playClip(name: string, frequency: number) {
+  // Plays the clip locally on this machine only.
+  function playTone(name: string, frequency: number) {
     const AudioContextCtor = window.AudioContext ?? (window as typeof window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
     if (!AudioContextCtor) return;
 
@@ -356,6 +446,16 @@ export default function VoiceChannel({ channelId, channelName, userId, userName 
     oscillator.stop(ctx.currentTime + 0.3);
     setLastClip(name);
     window.setTimeout(() => ctx.close(), 420);
+  }
+
+  // Plays locally and tells everyone else in the channel to play it too.
+  function playClip(name: string, frequency: number) {
+    playTone(name, frequency);
+    fetch(`/api/voice/${channelId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', 'x-user-id': String(userId) },
+      body: JSON.stringify({ soundboard: { name, tone: frequency } }),
+    }).catch(() => {});
   }
 
   useEffect(() => {
@@ -393,6 +493,12 @@ export default function VoiceChannel({ channelId, channelName, userId, userName 
       ch.bind('voice-user-state-updated', (updated: Partial<Participant> & { userId: number }) => {
         dbg(`Pusher voice-user-state-updated — userId: ${updated.userId}`);
         setParticipants(prev => prev.map(p => (p.userId === updated.userId ? { ...p, ...updated } : p)));
+      });
+
+      ch.bind('voice-soundboard', (clip: { userId: number; name: string; tone: number }) => {
+        if (clip.userId === userId) return; // we already played it locally
+        dbg(`Pusher voice-soundboard — ${clip.name} from userId ${clip.userId}`);
+        playTone(clip.name, clip.tone);
       });
     } catch (e) {
       dbg(`Pusher setup ERROR: ${e}`);
@@ -582,7 +688,7 @@ export default function VoiceChannel({ channelId, channelName, userId, userName 
                 {['Clean', 'Radio', 'Deep'].map(effect => (
                   <button
                     key={effect}
-                    onClick={() => setVoiceEffect(effect)}
+                    onClick={() => changeVoiceEffect(effect)}
                     className="rounded-md px-2 py-1.5 text-[11px] transition-colors"
                     style={{
                       background: voiceEffect === effect ? 'var(--bg-elevated)' : 'transparent',
