@@ -35,3 +35,38 @@ export function ensureProfileColumns(): Promise<void> {
   })();
   return _profileMigration;
 }
+
+let _featureMigration: Promise<void> | null = null;
+
+export function ensureFeatureColumns(): Promise<void> {
+  if (_featureMigration) return _featureMigration;
+  _featureMigration = (async () => {
+    try {
+      await db.execute(sql`ALTER TABLE messages ADD COLUMN IF NOT EXISTS reply_to_id integer`);
+      await db.execute(sql`ALTER TABLE messages ADD COLUMN IF NOT EXISTS is_pinned boolean NOT NULL DEFAULT false`);
+
+      await db.execute(sql`
+        CREATE TABLE IF NOT EXISTS message_reactions (
+          id serial PRIMARY KEY,
+          message_id integer NOT NULL,
+          user_id integer NOT NULL,
+          emoji text NOT NULL,
+          created_at timestamp NOT NULL DEFAULT now()
+        )
+      `);
+      await db.execute(sql`
+        CREATE UNIQUE INDEX IF NOT EXISTS message_reactions_unique
+        ON message_reactions(message_id, user_id, emoji)
+      `);
+
+      await db.execute(sql`ALTER TABLE voice_participants ADD COLUMN IF NOT EXISTS is_muted boolean NOT NULL DEFAULT false`);
+      await db.execute(sql`ALTER TABLE voice_participants ADD COLUMN IF NOT EXISTS is_deafened boolean NOT NULL DEFAULT false`);
+      await db.execute(sql`ALTER TABLE voice_participants ADD COLUMN IF NOT EXISTS is_speaking boolean NOT NULL DEFAULT false`);
+    } catch (e) {
+      console.error('[db] feature migration failed', e);
+      _featureMigration = null;
+      throw e;
+    }
+  })();
+  return _featureMigration;
+}

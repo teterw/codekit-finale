@@ -2,14 +2,16 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
+import { Eye, EyeOff } from 'lucide-react';
 
 export default function RegisterPage() {
   const router = useRouter();
-  const [name, setName] = useState('');
-  const [email, setEmail] = useState('');
+  const [name, setName]         = useState('');
+  const [email, setEmail]       = useState('');
   const [password, setPassword] = useState('');
-  const [error, setError] = useState('');
-  const [loading, setLoading] = useState(false);
+  const [showPw, setShowPw]     = useState(false);
+  const [error, setError]       = useState('');
+  const [loading, setLoading]   = useState(false);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -31,99 +33,116 @@ export default function RegisterPage() {
 
   return (
     <div
-      className="w-full max-w-sm rounded-lg p-8 shadow-xl"
-      style={{ background: '#2B2D31' }}
+      className="w-full max-w-md"
+      style={{
+        background: '#313338',
+        borderRadius: '5px',
+        boxShadow: '0 2px 10px 0 rgba(0,0,0,0.2), 0 0 0 1px rgba(0,0,0,0.12)',
+        padding: '32px 40px 40px',
+      }}
     >
-      <h1
-        className="text-2xl font-bold text-center mb-6"
-        style={{ color: 'var(--dc-text)' }}
-      >
-        Create an account
-      </h1>
+      {/* Heading */}
+      <div className="text-center mb-5">
+        <h1 className="font-black text-2xl mb-2" style={{ color: '#F2F3F5' }}>
+          Create an account
+        </h1>
+        <p className="text-[16px]" style={{ color: '#B5BAC1' }}>
+          We&apos;re so excited to have you!
+        </p>
+      </div>
 
+      {/* Error */}
       {error && (
         <div
-          className="mb-4 p-3 rounded text-sm"
-          style={{ background: '#3d0a0d', color: '#f38ba8', border: '1px solid #da373c44' }}
+          className="mb-4 px-3 py-2.5 rounded text-sm"
+          style={{ background: 'rgba(242,63,67,0.1)', color: '#F23F43', border: '1px solid rgba(242,63,67,0.3)' }}
         >
           {error}
         </div>
       )}
 
-      <form onSubmit={handleSubmit} className="flex flex-col gap-4">
-        <div className="flex flex-col gap-1">
-          <label
-            className="text-xs font-semibold uppercase tracking-wide"
-            style={{ color: 'var(--dc-text-muted)' }}
-          >
-            Username <span style={{ color: 'var(--dc-danger)' }}>*</span>
+      <form onSubmit={handleSubmit} className="flex flex-col gap-5">
+        {/* Username */}
+        <div>
+          <label className="block text-[12px] font-bold uppercase tracking-[0.04em] mb-2" style={{ color: '#B5BAC1' }}>
+            Username <span style={{ color: '#F23F43' }}>*</span>
           </label>
           <input
             type="text"
             value={name}
             onChange={e => setName(e.target.value)}
             required
-            className="rounded px-3 py-2 text-sm outline-none"
-            style={{
-              background: 'var(--dc-input-bg)',
-              color: 'var(--dc-text)',
-              border: '1px solid var(--dc-border)',
-            }}
+            placeholder="Your display name"
+            className="discord-input"
           />
+          <p className="mt-1.5 text-[12px]" style={{ color: '#949BA4' }}>
+            Please only use a name you&apos;re comfortable with.
+          </p>
         </div>
-        <div className="flex flex-col gap-1">
-          <label
-            className="text-xs font-semibold uppercase tracking-wide"
-            style={{ color: 'var(--dc-text-muted)' }}
-          >
-            Email <span style={{ color: 'var(--dc-danger)' }}>*</span>
+
+        {/* Email */}
+        <div>
+          <label className="block text-[12px] font-bold uppercase tracking-[0.04em] mb-2" style={{ color: '#B5BAC1' }}>
+            Email <span style={{ color: '#F23F43' }}>*</span>
           </label>
           <input
             type="email"
             value={email}
             onChange={e => setEmail(e.target.value)}
             required
-            className="rounded px-3 py-2 text-sm outline-none"
-            style={{
-              background: 'var(--dc-input-bg)',
-              color: 'var(--dc-text)',
-              border: '1px solid var(--dc-border)',
-            }}
+            placeholder="Enter your email"
+            className="discord-input"
           />
         </div>
-        <div className="flex flex-col gap-1">
-          <label
-            className="text-xs font-semibold uppercase tracking-wide"
-            style={{ color: 'var(--dc-text-muted)' }}
-          >
-            Password <span style={{ color: 'var(--dc-danger)' }}>*</span>
+
+        {/* Password */}
+        <div>
+          <label className="block text-[12px] font-bold uppercase tracking-[0.04em] mb-2" style={{ color: '#B5BAC1' }}>
+            Password <span style={{ color: '#F23F43' }}>*</span>
           </label>
-          <input
-            type="password"
-            value={password}
-            onChange={e => setPassword(e.target.value)}
-            required
-            className="rounded px-3 py-2 text-sm outline-none"
-            style={{
-              background: 'var(--dc-input-bg)',
-              color: 'var(--dc-text)',
-              border: '1px solid var(--dc-border)',
-            }}
-          />
+          <div className="relative">
+            <input
+              type={showPw ? 'text' : 'password'}
+              value={password}
+              onChange={e => setPassword(e.target.value)}
+              required
+              placeholder="Create a password"
+              className="discord-input pr-10"
+            />
+            <button
+              type="button"
+              onClick={() => setShowPw(v => !v)}
+              className="absolute right-3 top-1/2 -translate-y-1/2"
+              style={{ color: '#949BA4' }}
+            >
+              {showPw ? <EyeOff size={16} /> : <Eye size={16} />}
+            </button>
+          </div>
         </div>
+
+        {/* Terms */}
+        <p className="text-[12px]" style={{ color: '#949BA4' }}>
+          By registering, you agree to our{' '}
+          <span className="hover:underline cursor-pointer" style={{ color: '#00A8FC' }}>Terms of Service</span>{' '}
+          and{' '}
+          <span className="hover:underline cursor-pointer" style={{ color: '#00A8FC' }}>Privacy Policy</span>.
+        </p>
+
+        {/* Submit */}
         <button
           type="submit"
           disabled={loading}
-          className="w-full rounded py-2 text-sm font-medium text-white transition-colors disabled:opacity-60 mt-2"
-          style={{ background: 'var(--dc-accent)' }}
+          className="w-full font-semibold text-[16px] text-white disabled:opacity-60 transition-all hover:brightness-110 active:scale-[0.99]"
+          style={{ background: '#5865F2', borderRadius: '3px', height: '44px' }}
         >
-          {loading ? 'Creating account...' : 'Continue'}
+          {loading ? 'Creating account…' : 'Continue'}
         </button>
       </form>
 
-      <p className="mt-4 text-sm" style={{ color: 'var(--dc-text-muted)' }}>
+      {/* Switch to login */}
+      <p className="mt-4 text-[14px]" style={{ color: '#949BA4' }}>
         Already have an account?{' '}
-        <Link href="/login" style={{ color: 'var(--dc-text-link)' }} className="hover:underline">
+        <Link href="/login" className="hover:underline" style={{ color: '#00A8FC' }}>
           Log In
         </Link>
       </p>

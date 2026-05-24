@@ -1,4 +1,4 @@
-import { pgTable, serial, text, timestamp, integer, primaryKey, uniqueIndex } from 'drizzle-orm/pg-core';
+import { boolean, pgTable, serial, text, timestamp, integer, uniqueIndex, primaryKey } from 'drizzle-orm/pg-core';
 
 export const users = pgTable('users', {
   id: serial('id').primaryKey(),
@@ -36,9 +36,21 @@ export const messages = pgTable('messages', {
   channelId: integer('channel_id').notNull(),
   userId: integer('user_id').notNull(),
   content: text('content').notNull(),
+  replyToId: integer('reply_to_id'),
+  isPinned: boolean('is_pinned').notNull().default(false),
   createdAt: timestamp('created_at').notNull().defaultNow(),
   updatedAt: timestamp('updated_at').notNull().defaultNow(),
 });
+
+export const messageReactions = pgTable('message_reactions', {
+  id: serial('id').primaryKey(),
+  messageId: integer('message_id').notNull(),
+  userId: integer('user_id').notNull(),
+  emoji: text('emoji').notNull(),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+}, (t) => [
+  uniqueIndex('message_reactions_unique').on(t.messageId, t.userId, t.emoji),
+]);
 
 export const members = pgTable('members', {
   userId: integer('user_id').notNull(),
@@ -64,6 +76,9 @@ export const voiceParticipants = pgTable('voice_participants', {
   channelId: integer('channel_id').notNull(),
   userId: integer('user_id').notNull(),
   peerId: text('peer_id').notNull(),
+  isMuted: boolean('is_muted').notNull().default(false),
+  isDeafened: boolean('is_deafened').notNull().default(false),
+  isSpeaking: boolean('is_speaking').notNull().default(false),
   updatedAt: timestamp('updated_at').notNull().defaultNow(),
 }, (t) => [
   uniqueIndex('voice_participants_channel_user').on(t.channelId, t.userId),
