@@ -1,4 +1,4 @@
-import { db } from '@/db';
+import { db, ensureSchema } from '@/db';
 import { users } from '@/db/schema';
 import { eq } from 'drizzle-orm';
 import { errorResponse, hashPassword, jsonResponse } from '@/lib/api-helpers';
@@ -20,6 +20,8 @@ export async function POST(request: Request) {
     if (!name || !email || !password) {
       return errorResponse('name, email, and password are required', 400);
     }
+
+    await ensureSchema();
 
     const existing = await db.select().from(users).where(eq(users.email, email)).limit(1);
     if (existing.length > 0) {
