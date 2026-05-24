@@ -33,6 +33,7 @@ export default function MainApp() {
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [serversLoading, setServersLoading] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -84,9 +85,11 @@ export default function MainApp() {
       })
       .catch(() => {});
 
+    setServersLoading(true);
     queueMicrotask(async () => {
       const list = await fetchServers(userId);
       if (cancelled) return;
+      setServersLoading(false);
       if (list && list.length > 0) {
         setSelectedServer(list[0]);
         fetchServerDetails(userId, list[0].id);
@@ -168,7 +171,7 @@ export default function MainApp() {
     });
   }
 
-  if (loading) {
+  if (loading || serversLoading) {
     return (
       <div className="flex items-center justify-center min-h-screen" style={{ background: 'var(--bg)' }}>
         <motion.div

@@ -300,15 +300,35 @@ export default function ChatArea({ channelId, channelName, userId, userName, onO
   }
 
   const handleReaction = useCallback(async (messageId: number, emoji: string) => {
+    // Optimistic toggle so the UI responds instantly
+    setReactionsMap(prev => {
+      const current = [...(prev[messageId] ?? [])];
+      const idx = current.findIndex(r => r.emoji === emoji);
+      if (idx >= 0) {
+        const r = current[idx];
+        if (r.userReacted) {
+          if (r.count <= 1) current.splice(idx, 1);
+          else current[idx] = { ...r, count: r.count - 1, userReacted: false };
+        } else {
+          current[idx] = { ...r, count: r.count + 1, userReacted: true };
+        }
+      } else {
+        current.push({ emoji, count: 1, userReacted: true });
+      }
+      return { ...prev, [messageId]: current };
+    });
+
     try {
-      await fetch('/api/reactions', {
+      const res = await fetch('/api/reactions', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'x-user-id': String(userId) },
         body: JSON.stringify({ messageId, channelId, emoji }),
       });
-    } catch {
-      // Reactions are non-critical.
-    }
+      if (res.ok) {
+        const data = await res.json();
+        setReactionsMap(prev => ({ ...prev, [messageId]: data.reactions }));
+      }
+    } catch { }
   }, [channelId, userId]);
 
   const handleUpdated = useCallback((updated: Message) => {
