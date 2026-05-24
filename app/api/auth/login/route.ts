@@ -1,4 +1,4 @@
-import { db, ensureSchema } from '@/db';
+import { db, ensureProfileColumns } from '@/db';
 import { users } from '@/db/schema';
 import { eq } from 'drizzle-orm';
 import { errorResponse, jsonResponse, verifyPassword } from '@/lib/api-helpers';
@@ -13,7 +13,7 @@ export async function POST(request: Request) {
       return errorResponse('Email and password are required', 400);
     }
 
-    await ensureSchema();
+    await ensureProfileColumns();
 
     const [user] = await db
       .select({ id: users.id, name: users.name, email: users.email, avatar: users.avatar, password: users.password })

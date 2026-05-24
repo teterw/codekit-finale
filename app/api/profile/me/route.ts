@@ -1,35 +1,44 @@
-import { db } from '@/db';
+import { db, ensureProfileColumns } from '@/db';
 import { users } from '@/db/schema';
 import { and, eq, ne } from 'drizzle-orm';
 import { errorResponse, getUserId, jsonResponse } from '@/lib/api-helpers';
 import { getPusherServer } from '@/lib/pusher';
 
 export async function GET(request: Request) {
-  const userId = getUserId(request);
-  if (!userId) return errorResponse('Unauthorized', 401);
+  try {
+    const userId = getUserId(request);
+    if (!userId) return errorResponse('Unauthorized', 401);
 
-  const [user] = await db
-    .select({
-      id: users.id,
-      name: users.name,
-      email: users.email,
-      avatar: users.avatar,
-      username: users.username,
-      bio: users.bio,
-      status: users.status,
-      createdAt: users.createdAt,
-    })
-    .from(users)
-    .where(eq(users.id, userId))
-    .limit(1);
+    await ensureProfileColumns();
 
-  if (!user) return errorResponse('User not found', 404);
-  return jsonResponse({ user });
+    const [user] = await db
+      .select({
+        id: users.id,
+        name: users.name,
+        email: users.email,
+        avatar: users.avatar,
+        username: users.username,
+        bio: users.bio,
+        status: users.status,
+        createdAt: users.createdAt,
+      })
+      .from(users)
+      .where(eq(users.id, userId))
+      .limit(1);
+
+    if (!user) return errorResponse('User not found', 404);
+    return jsonResponse({ user });
+  } catch (e) {
+    console.error('[profile/me GET]', e);
+    return errorResponse('Failed to load profile', 500);
+  }
 }
 
 export async function PATCH(request: Request) {
   const userId = getUserId(request);
   if (!userId) return errorResponse('Unauthorized', 401);
+
+  await ensureProfileColumns();
 
   const body = (await request.json()) as {
     name?: string;
@@ -91,21 +100,26 @@ export async function PATCH(request: Request) {
 
   update.updatedAt = new Date();
 
-  const [updated] = await db.update(users).set(update).where(eq(users.id, userId)).returning();
-  if (!updated) return errorResponse('User not found', 404);
-
-  const profile = {
-    id: updated.id,
-    name: updated.name,
-    username: updated.username,
-    avatar: updated.avatar,
-    bio: updated.bio,
-    status: updated.status,
-  };
-
   try {
-    await getPusherServer().trigger(`user-${userId}`, 'profile-updated', profile);
-  } catch { /* Pusher not configured */ }
+    const [updated] = await db.update(users).set(update).where(eq(users.id, userId)).returning();
+    if (!updated) return errorResponse('User not found', 404);
 
-  return jsonResponse({ user: { ...profile, email: updated.email, createdAt: updated.createdAt } });
+    const profile = {
+      id: updated.id,
+      name: updated.name,
+      username: updated.username,
+      avatar: updated.avatar,
+      bio: updated.bio,
+      status: updated.status,
+    };
+
+    try {
+      await getPusherServer().trigger(`user-${userId}`, 'profile-updated', profile);
+    } catch { /* Pusher not configured */ }
+
+    return jsonResponse({ user: { ...profile, email: updated.email, createdAt: updated.createdAt } });
+  } catch (e) {
+    console.error('[profile/me PATCH]', e);
+    return errorResponse('Failed to save profile', 500);
+  }
 }

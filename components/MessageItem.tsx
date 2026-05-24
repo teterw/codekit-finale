@@ -1,5 +1,5 @@
 'use client';
-import { memo, useRef, useState } from 'react';
+import { memo, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { AnimatePresence, motion } from 'framer-motion';
 import { Check, MessageCircle, Pencil, Pin, Reply, SmilePlus, Trash2, X } from 'lucide-react';
@@ -71,6 +71,17 @@ function MessageItem({
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const pickerRef = useRef<HTMLDivElement>(null);
   const isOwn = message.userId === currentUserId;
+
+  useEffect(() => {
+    if (!showEmojiPicker) return;
+    function handleClick(e: MouseEvent) {
+      if (pickerRef.current && !pickerRef.current.contains(e.target as Node)) {
+        setShowEmojiPicker(false);
+      }
+    }
+    document.addEventListener('mousedown', handleClick);
+    return () => document.removeEventListener('mousedown', handleClick);
+  }, [showEmojiPicker]);
 
   const createdDate = new Date(message.createdAt);
   const updatedDate = new Date(message.updatedAt);
@@ -259,8 +270,12 @@ function MessageItem({
       <AnimatePresence>
         {(isOwn || onReaction || onReply || onOpenThread) && !editing && (
           <motion.div
-            className="message-actions absolute right-4 -top-3 flex gap-0.5 rounded-lg overflow-hidden shadow-lg"
-            style={{ background: 'var(--bg-elevated)', border: '1px solid var(--border)' }}
+            className="message-actions absolute right-4 -top-3 flex gap-0.5 rounded-lg shadow-lg"
+            style={{
+              background: 'var(--bg-elevated)',
+              border: '1px solid var(--border)',
+              ...(showEmojiPicker ? { opacity: 1, pointerEvents: 'auto' as const } : {}),
+            }}
           >
             {onReaction && (
               <div className="relative" ref={pickerRef}>
@@ -276,7 +291,6 @@ function MessageItem({
                       transition={{ duration: 0.12 }}
                       className="absolute bottom-full mb-1 right-0 flex gap-1 p-1.5 rounded-xl shadow-xl z-50"
                       style={{ background: 'var(--bg-elevated)', border: '1px solid var(--border)' }}
-                      onMouseLeave={() => setShowEmojiPicker(false)}
                     >
                       {EMOJIS.map(emoji => (
                         <motion.button
