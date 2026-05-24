@@ -2,7 +2,8 @@
   "permissions": {
     "allow": [
       "Bash(git *)",
-      "Bash(curl -s -o - -w \"\\\\n[HTTP %{http_code}]\\\\n\" \"http://localhost:3000/api/friends\" -H \"x-user-id: 1\")"
+      "Bash(curl -s -o - -w \"\\\\n[HTTP %{http_code}]\\\\n\" \"http://localhost:3000/api/friends\" -H \"x-user-id: 1\")",
+      "Bash(curl -s -o /dev/null -w 'req __TRACKED_VAR__: %{time_total}s [%{http_code}]\\\\n' http://localhost:3000/api/voice/1 -H 'x-user-id: 1')"
     ]
   }
 }
