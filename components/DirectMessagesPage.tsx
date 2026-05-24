@@ -97,41 +97,7 @@ interface ApiMessage {
   userAvatar: string | null;
 }
 
-const requestsSeed: MessageRequest[] = [
-  {
-    id: 1,
-    name: 'Free Gold in Game',
-    handle: 'gold-drop',
-    status: 'spam',
-    title: 'Free Gold in Game',
-    preview: 'Sign up for free! Epic Legends mobile free gold at this limited link.',
-    time: 'Today at 9:18 AM',
-    accent: '#d7dce3',
-    initials: 'FG',
-  },
-  {
-    id: 2,
-    name: 'Web Bot',
-    handle: 'web.bot',
-    status: 'spam',
-    title: 'Web Bot',
-    preview: 'Hurry! Your chance to redeem free prizes is running out!',
-    time: 'Yesterday at 11:22 PM',
-    accent: '#c49a6c',
-    initials: 'WB',
-  },
-  {
-    id: 3,
-    name: 'Nia',
-    handle: 'nia.design',
-    status: 'requests',
-    title: 'Nia',
-    preview: 'Hey, are you the person building the launch community page?',
-    time: 'Today at 8:04 AM',
-    accent: '#23a55a',
-    initials: 'NI',
-  },
-];
+const requestsSeed: MessageRequest[] = [];
 
 function convDisplay(conv: Conversation, userId: number) {
   if (conv.type === 'dm') {
@@ -339,11 +305,17 @@ export default function DirectMessagesPage({ userId }: { userId: number }) {
                 </div>
               </main>
 
-              <RequestPreview
-                request={selectedRequest}
-                onAccept={() => markRequest(selectedRequest.id, 'accepted')}
-                onReport={() => markRequest(selectedRequest.id, 'reported')}
-              />
+              {selectedRequest ? (
+                <RequestPreview
+                  request={selectedRequest}
+                  onAccept={() => markRequest(selectedRequest.id, 'accepted')}
+                  onReport={() => markRequest(selectedRequest.id, 'reported')}
+                />
+              ) : (
+                <aside className="hidden w-[450px] flex-shrink-0 flex-col items-center justify-center bg-[#313338] text-sm text-[#949ba4] xl:flex">
+                  No requests to show.
+                </aside>
+              )}
             </div>
           </>
         )}
