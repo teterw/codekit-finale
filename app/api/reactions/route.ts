@@ -28,7 +28,8 @@ export async function GET(request: Request) {
         .select()
         .from(messageReactions)
         .where(inArray(messageReactions.messageId, messageIds));
-    } catch {
+    } catch (err) {
+      console.error('[reactions GET] table select failed:', err);
       return jsonResponse({ reactions: {} });
     }
 
@@ -45,7 +46,8 @@ export async function GET(request: Request) {
     }
 
     return jsonResponse({ reactions: result });
-  } catch {
+  } catch (err) {
+    console.error('[reactions GET] outer error:', err);
     return jsonResponse({ reactions: {} });
   }
 }
@@ -53,15 +55,25 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   try {
     const userId = getUserId(request);
+    console.log('[reactions POST] userId:', userId);
     if (!userId) return errorResponse('Unauthorized', 401);
 
-    await ensureFeatureColumns();
+    try {
+      await ensureFeatureColumns();
+      console.log('[reactions POST] ensureFeatureColumns done');
+    } catch (err) {
+      console.error('[reactions POST] ensureFeatureColumns error:', err);
+    }
 
     const body = (await request.json()) as { messageId?: number; channelId?: number; emoji?: string };
     const { messageId, channelId, emoji } = body;
+    console.log('[reactions POST] body:', { messageId, channelId, emoji });
 
     if (!messageId || !channelId || !emoji) return errorResponse('messageId, channelId, emoji required', 400);
-    if (!ALLOWED_EMOJIS.has(emoji)) return errorResponse('Invalid emoji', 400);
+    if (!ALLOWED_EMOJIS.has(emoji)) {
+      console.error('[reactions POST] invalid emoji:', emoji);
+      return errorResponse('Invalid emoji', 400);
+    }
 
     let existing: typeof messageReactions.$inferSelect | undefined;
     try {
@@ -70,14 +82,26 @@ export async function POST(request: Request) {
         .from(messageReactions)
         .where(and(eq(messageReactions.messageId, messageId), eq(messageReactions.userId, userId), eq(messageReactions.emoji, emoji)))
         .limit(1);
-    } catch {
-      return errorResponse('Reactions not available', 503);
+      console.log('[reactions POST] existing reaction:', existing ?? 'none');
+    } catch (err) {
+      console.error('[reactions POST] select existing failed (table may not exist):', err);
+      return errorResponse('Reactions table not available: ' + String(err), 503);
     }
 
     if (existing) {
-      try { await db.delete(messageReactions).where(eq(messageReactions.id, existing.id)); } catch {}
+      try {
+        await db.delete(messageReactions).where(eq(messageReactions.id, existing.id));
+        console.log('[reactions POST] deleted reaction', existing.id);
+      } catch (err) {
+        console.error('[reactions POST] delete failed:', err);
+      }
     } else {
-      try { await db.insert(messageReactions).values({ messageId, userId, emoji }); } catch {}
+      try {
+        await db.insert(messageReactions).values({ messageId, userId, emoji });
+        console.log('[reactions POST] inserted reaction');
+      } catch (err) {
+        console.error('[reactions POST] insert failed:', err);
+      }
     }
 
     let rows: typeof messageReactions.$inferSelect[] = [];
@@ -86,7 +110,9 @@ export async function POST(request: Request) {
         .select()
         .from(messageReactions)
         .where(eq(messageReactions.messageId, messageId));
-    } catch {}
+    } catch (err) {
+      console.error('[reactions POST] re-fetch failed:', err);
+    }
 
     const reactions: { emoji: string; count: number; userReacted: boolean }[] = [];
     for (const row of rows) {
@@ -103,8 +129,10 @@ export async function POST(request: Request) {
       await getPusherServer().trigger(`channel-${channelId}`, 'reaction-updated', { messageId, reactions });
     } catch { /* Pusher not configured */ }
 
+    console.log('[reactions POST] returning reactions:', reactions);
     return jsonResponse({ reactions });
-  } catch {
-    return errorResponse('Unable to process reaction', 500);
+  } catch (err) {
+    console.error('[reactions POST] outer error:', err);
+    return errorResponse('Unable to process reaction: ' + String(err), 500);
   }
 }
