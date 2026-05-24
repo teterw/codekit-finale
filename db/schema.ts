@@ -264,3 +264,13 @@ export const soundboardClips = pgTable('soundboard_clips', {
   createdById: integer('created_by_id').notNull(),
   createdAt: timestamp('created_at').notNull().defaultNow(),
 });
+
+export const friendships = pgTable('friendships', {
+  id: serial('id').primaryKey(),
+  requesterId: integer('requester_id').notNull(),
+  addresseeId: integer('addressee_id').notNull(),
+  status: text('status').notNull().default('pending'),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+}, (t) => [
+  uniqueIndex('friendships_pair_unique').on(t.requesterId, t.addresseeId),
+]);

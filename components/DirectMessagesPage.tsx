@@ -1,10 +1,11 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   AtSign,
   Bell,
+  Check,
   CircleHelp,
   Compass,
   Download,
@@ -13,14 +14,27 @@ import {
   Inbox,
   Mail,
   MessageSquarePlus,
+  Phone,
   Plus,
   Search,
+  Send,
+  UserPlus,
   UserRound,
   UsersRound,
   X,
 } from 'lucide-react';
+import VoiceChannel from '@/components/VoiceChannel';
+import { getPusherClient } from '@/lib/pusher-client';
 
 type RequestStatus = 'requests' | 'spam';
+type View = 'friends' | 'requests' | 'dm';
+
+const DM_CALL_OFFSET = 1_000_000;
+const ACCENTS = ['#5865f2', '#23a55a', '#fee75c', '#eb459e', '#ef4444', '#3ba55c', '#faa61a'];
+
+function accentFor(id: number) {
+  return ACCENTS[Math.abs(id) % ACCENTS.length];
+}
 
 interface MessageRequest {
   id: number;
@@ -37,21 +51,40 @@ interface MessageRequest {
   reported?: boolean;
 }
 
-interface DirectMessage {
-  id: number;
-  name: string;
-  status: string;
-  note?: string;
-  initials: string;
-  accent: string;
-  unread?: boolean;
-}
-
 interface Server {
   id: number;
   name: string;
   icon: string | null;
   ownerId: number;
+}
+
+interface ConvMember {
+  id: number;
+  name: string;
+  avatar: string | null;
+  status: string;
+}
+
+interface Conversation {
+  id: number;
+  type: string;
+  name: string | null;
+  members: ConvMember[];
+  lastMessage: { content: string; createdAt: string } | null;
+}
+
+interface Friend {
+  friendshipId: number;
+  userId: number;
+  name: string;
+  avatar: string | null;
+  status: string;
+}
+
+interface FriendsState {
+  friends: Friend[];
+  incoming: Friend[];
+  outgoing: Friend[];
 }
 
 interface ApiMessage {
@@ -100,154 +133,505 @@ const requestsSeed: MessageRequest[] = [
   },
 ];
 
-const directMessages: DirectMessage[] = [
-  { id: 1, name: 'Deku', status: 'Playing Wumpus Castle', initials: 'DE', accent: '#fee75c', unread: true },
-  { id: 2, name: 'Group DM for Awesome', status: '9 Members', initials: 'GD', accent: '#23a55a' },
-  { id: 3, name: 'jigglepugg', status: 'Online', initials: 'JI', accent: '#5865f2' },
-];
+function convDisplay(conv: Conversation, userId: number) {
+  if (conv.type === 'dm') {
+    const other = conv.members.find((m) => m.id !== userId) ?? conv.members[0];
+    const name = other?.name ?? 'Direct Message';
+    return {
+      name,
+      initials: name.slice(0, 2).toUpperCase(),
+      accent: accentFor(other?.id ?? conv.id),
+      status: other?.status ?? 'offline',
+      isGroup: false,
+    };
+  }
+  const name = conv.name ?? (conv.members.filter((m) => m.id !== userId).map((m) => m.name).join(', ') || 'Group');
+  return {
+    name,
+    initials: name.slice(0, 2).toUpperCase(),
+    accent: accentFor(conv.id),
+    status: `${conv.members.length} Members`,
+    isGroup: true,
+  };
+}
 
 export default function DirectMessagesPage({ userId }: { userId: number }) {
   const router = useRouter();
   const [servers, setServers] = useState<Server[]>([]);
+  const [conversations, setConversations] = useState<Conversation[]>([]);
+  const [friends, setFriends] = useState<FriendsState>({ friends: [], incoming: [], outgoing: [] });
+  const [myName, setMyName] = useState('You');
+
+  const [view, setView] = useState<View>('friends');
+  const [selectedConvId, setSelectedConvId] = useState<number | null>(null);
+
   const [tab, setTab] = useState<RequestStatus>('spam');
   const [requests, setRequests] = useState(requestsSeed);
-  const [selectedId, setSelectedId] = useState(2);
-  const [draft, setDraft] = useState('');
-  const [messages, setMessages] = useState<ApiMessage[]>([]);
-  const [loadingMessages, setLoadingMessages] = useState(false);
+  const [selectedRequestId, setSelectedRequestId] = useState(3);
 
-  useEffect(() => {
-    fetch('/api/servers', { headers: { 'x-user-id': String(userId) } })
-      .then(res => (res.ok ? res.json() : { servers: [] }))
-      .then(data => setServers(data.servers ?? []))
-      .catch(() => setServers([]));
+  const refreshConversations = useCallback(() => {
+    fetch('/api/direct-messages', { headers: { 'x-user-id': String(userId) } })
+      .then((res) => (res.ok ? res.json() : { conversations: [] }))
+      .then((data) => setConversations(data.conversations ?? []))
+      .catch(() => setConversations([]));
+  }, [userId]);
+
+  const refreshFriends = useCallback(() => {
+    fetch('/api/friends', { headers: { 'x-user-id': String(userId) } })
+      .then((res) => (res.ok ? res.json() : { friends: [], incoming: [], outgoing: [] }))
+      .then((data) => setFriends({ friends: data.friends ?? [], incoming: data.incoming ?? [], outgoing: data.outgoing ?? [] }))
+      .catch(() => {});
   }, [userId]);
 
   useEffect(() => {
-    if (!selectedId) return;
-    setLoadingMessages(true);
-    setMessages([]);
-    fetch(`/api/direct-messages/${selectedId}`, { headers: { 'x-user-id': String(userId) } })
-      .then(res => (res.ok ? res.json() : { messages: [] }))
-      .then(data => setMessages(([...(data.messages ?? [])]).reverse()))
-      .catch(() => {})
-      .finally(() => setLoadingMessages(false));
-  }, [selectedId, userId]);
+    fetch('/api/servers', { headers: { 'x-user-id': String(userId) } })
+      .then((res) => (res.ok ? res.json() : { servers: [] }))
+      .then((data) => setServers(data.servers ?? []))
+      .catch(() => setServers([]));
+
+    fetch('/api/profile/me', { headers: { 'x-user-id': String(userId) } })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => { if (data?.user?.name) setMyName(data.user.name); })
+      .catch(() => {});
+
+    refreshConversations();
+    refreshFriends();
+  }, [userId, refreshConversations, refreshFriends]);
+
+  const openDm = useCallback(
+    async (targetUserId: number) => {
+      const res = await fetch('/api/direct-messages', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-user-id': String(userId) },
+        body: JSON.stringify({ targetUserId }),
+      });
+      if (!res.ok) return;
+      const data = (await res.json()) as { conversationId: number };
+      refreshConversations();
+      setSelectedConvId(data.conversationId);
+      setView('dm');
+    },
+    [userId, refreshConversations],
+  );
+
+  async function addFriend(name: string) {
+    const trimmed = name.trim();
+    if (!trimmed) return;
+    await fetch('/api/friends', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-user-id': String(userId) },
+      body: JSON.stringify({ name: trimmed }),
+    });
+    refreshFriends();
+  }
+
+  async function acceptFriend(friendshipId: number) {
+    await fetch(`/api/friends/${friendshipId}`, {
+      method: 'PATCH',
+      headers: { 'x-user-id': String(userId) },
+    });
+    refreshFriends();
+  }
+
+  async function removeFriend(friendshipId: number) {
+    await fetch(`/api/friends/${friendshipId}`, {
+      method: 'DELETE',
+      headers: { 'x-user-id': String(userId) },
+    });
+    refreshFriends();
+  }
 
   const visibleRequests = useMemo(
-    () => requests.filter(request => request.status === tab && !request.accepted && !request.reported),
+    () => requests.filter((request) => request.status === tab && !request.accepted && !request.reported),
     [requests, tab],
   );
-  const selectedRequest = requests.find(request => request.id === selectedId) ?? visibleRequests[0] ?? requests[0];
-  const spamCount = requests.filter(request => request.status === 'spam' && !request.accepted && !request.reported).length;
-  const requestCount = requests.filter(request => request.status === 'requests' && !request.accepted && !request.reported).length;
+  const selectedRequest = requests.find((r) => r.id === selectedRequestId) ?? visibleRequests[0] ?? requests[0];
+  const spamCount = requests.filter((r) => r.status === 'spam' && !r.accepted && !r.reported).length;
+  const requestCount = requests.filter((r) => r.status === 'requests' && !r.accepted && !r.reported).length;
+  const pendingTotal = requestCount + spamCount + friends.incoming.length;
+
+  const selectedConv = conversations.find((c) => c.id === selectedConvId) ?? null;
 
   function markRequest(id: number, field: 'accepted' | 'reported') {
-    setRequests(prev => prev.map(request => request.id === id ? { ...request, [field]: true } : request));
+    setRequests((prev) => prev.map((r) => (r.id === id ? { ...r, [field]: true } : r)));
   }
 
   function clearAllSpam() {
-    setRequests(prev => prev.map(request => request.status === 'spam' ? { ...request, reported: true } : request));
-  }
-
-  async function sendMessage() {
-    const content = draft.trim();
-    if (!content) return;
-    setDraft('');
-
-    const res = await fetch(`/api/direct-messages/${selectedId}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'x-user-id': String(userId) },
-      body: JSON.stringify({ content }),
-    });
-
-    if (res.ok) {
-      const data = await res.json();
-      setMessages(prev => [...prev, data.message as ApiMessage]);
-    } else {
-      const tempMsg: ApiMessage = {
-        id: Date.now() * -1,
-        content,
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-        userId,
-        userName: 'You',
-        userAvatar: null,
-      };
-      setMessages(prev => [...prev, tempMsg]);
-    }
+    setRequests((prev) => prev.map((r) => (r.status === 'spam' ? { ...r, reported: true } : r)));
   }
 
   return (
     <div className="flex h-screen overflow-hidden bg-[#313338] text-[#f2f3f5]">
-      <ServerRail servers={servers} onSelectServer={id => router.push(`/channels/${id}`)} />
-      <DirectSidebar requestCount={requestCount + spamCount} />
+      <ServerRail servers={servers} onSelectServer={(id) => router.push(`/channels/${id}`)} />
+      <DirectSidebar
+        userId={userId}
+        view={view}
+        conversations={conversations}
+        selectedConvId={selectedConvId}
+        requestBadge={pendingTotal}
+        onShowFriends={() => setView('friends')}
+        onShowRequests={() => setView('requests')}
+        onSelectConv={(id) => { setSelectedConvId(id); setView('dm'); }}
+      />
 
       <section className="flex min-w-0 flex-1 flex-col">
-        <TopBar tab={tab} setTab={setTab} requestCount={requestCount} spamCount={spamCount} />
-
-        <div className="flex min-h-0 flex-1">
-          <main className="min-w-0 flex-1 border-r border-black/40 bg-[#313338]">
-            <div className="px-8 py-5">
-              <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wide text-[#b5bac1]">
-                <span>{tab === 'spam' ? `Spam - ${spamCount}` : `Requests - ${requestCount}`}</span>
-                {tab === 'spam' && (
-                  <button onClick={clearAllSpam} className="font-medium normal-case text-[#00a8fc] hover:underline">
-                    Clear All
-                  </button>
-                )}
-              </div>
-
-              <div className="mt-4 border-t border-black/30">
-                {visibleRequests.map(request => (
-                  <RequestRow
-                    key={request.id}
-                    request={request}
-                    selected={selectedRequest.id === request.id}
-                    onSelect={() => setSelectedId(request.id)}
-                    onAccept={() => markRequest(request.id, 'accepted')}
-                    onReport={() => markRequest(request.id, 'reported')}
-                  />
-                ))}
-
-                {visibleRequests.length === 0 && (
-                  <div className="flex h-80 items-center justify-center text-sm text-[#949ba4]">
-                    No {tab === 'spam' ? 'spam' : 'message'} requests.
-                  </div>
-                )}
-              </div>
-            </div>
-          </main>
-
-          <MessagePreview
-            request={selectedRequest}
-            messages={messages}
-            loadingMessages={loadingMessages}
-            userId={userId}
-            draft={draft}
-            onDraftChange={setDraft}
-            onSend={sendMessage}
-            onAccept={() => markRequest(selectedRequest.id, 'accepted')}
-            onReport={() => markRequest(selectedRequest.id, 'reported')}
+        {view === 'friends' && (
+          <FriendsPanel
+            friends={friends}
+            onAddFriend={addFriend}
+            onAccept={acceptFriend}
+            onRemove={removeFriend}
+            onMessage={openDm}
           />
-        </div>
+        )}
+
+        {view === 'dm' && selectedConv && (
+          <ConversationView
+            key={selectedConv.id}
+            conv={selectedConv}
+            userId={userId}
+            myName={myName}
+            onSent={refreshConversations}
+          />
+        )}
+
+        {view === 'dm' && !selectedConv && (
+          <div className="flex flex-1 items-center justify-center text-sm text-[#949ba4]">
+            Select a conversation.
+          </div>
+        )}
+
+        {view === 'requests' && (
+          <>
+            <TopBar tab={tab} setTab={setTab} requestCount={requestCount} spamCount={spamCount} />
+            <div className="flex min-h-0 flex-1">
+              <main className="min-w-0 flex-1 border-r border-black/40 bg-[#313338]">
+                <div className="px-8 py-5">
+                  <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wide text-[#b5bac1]">
+                    <span>{tab === 'spam' ? `Spam - ${spamCount}` : `Requests - ${requestCount}`}</span>
+                    {tab === 'spam' && (
+                      <button onClick={clearAllSpam} className="font-medium normal-case text-[#00a8fc] hover:underline">
+                        Clear All
+                      </button>
+                    )}
+                  </div>
+
+                  <div className="mt-4 border-t border-black/30">
+                    {visibleRequests.map((request) => (
+                      <RequestRow
+                        key={request.id}
+                        request={request}
+                        selected={selectedRequest.id === request.id}
+                        onSelect={() => setSelectedRequestId(request.id)}
+                        onAccept={() => markRequest(request.id, 'accepted')}
+                        onReport={() => markRequest(request.id, 'reported')}
+                      />
+                    ))}
+
+                    {visibleRequests.length === 0 && (
+                      <div className="flex h-80 items-center justify-center text-sm text-[#949ba4]">
+                        No {tab === 'spam' ? 'spam' : 'message'} requests.
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </main>
+
+              <RequestPreview
+                request={selectedRequest}
+                onAccept={() => markRequest(selectedRequest.id, 'accepted')}
+                onReport={() => markRequest(selectedRequest.id, 'reported')}
+              />
+            </div>
+          </>
+        )}
       </section>
     </div>
   );
 }
 
-function ServerRail({
-  servers,
-  onSelectServer,
+function ConversationView({
+  conv,
+  userId,
+  myName,
+  onSent,
 }: {
-  servers: Server[];
-  onSelectServer: (id: number) => void;
+  conv: Conversation;
+  userId: number;
+  myName: string;
+  onSent: () => void;
 }) {
-  const router = useRouter();
+  const display = convDisplay(conv, userId);
+  const other = conv.members.find((m) => m.id !== userId);
+  const [messages, setMessages] = useState<ApiMessage[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [draft, setDraft] = useState('');
+  const [inCall, setInCall] = useState(false);
+  const scrollRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    setLoading(true);
+    setMessages([]);
+    fetch(`/api/direct-messages/${conv.id}`, { headers: { 'x-user-id': String(userId) } })
+      .then((res) => (res.ok ? res.json() : { messages: [] }))
+      .then((data) => setMessages([...(data.messages ?? [])].reverse()))
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, [conv.id, userId]);
+
+  useEffect(() => {
+    let pusher: ReturnType<typeof getPusherClient> | null = null;
+    try {
+      pusher = getPusherClient(userId);
+      const ch = pusher.subscribe(`dm-${conv.id}`);
+      ch.bind('dm-message', (msg: ApiMessage) => {
+        setMessages((prev) => (prev.some((m) => m.id === msg.id) ? prev : [...prev, msg]));
+      });
+    } catch { /* Pusher not configured */ }
+    return () => {
+      try { pusher?.unsubscribe(`dm-${conv.id}`); } catch { /* ignore */ }
+    };
+  }, [conv.id, userId]);
+
+  useEffect(() => {
+    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
+  }, [messages]);
+
+  async function send() {
+    const content = draft.trim();
+    if (!content) return;
+    setDraft('');
+    const res = await fetch(`/api/direct-messages/${conv.id}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-user-id': String(userId) },
+      body: JSON.stringify({ content }),
+    });
+    if (res.ok) {
+      const data = await res.json();
+      setMessages((prev) => (prev.some((m) => m.id === data.message.id) ? prev : [...prev, data.message]));
+      onSent();
+    }
+  }
 
   return (
+    <>
+      <header className="flex h-12 flex-shrink-0 items-center gap-3 border-b border-black/40 bg-[#313338] px-4">
+        <AtSign size={22} className="text-[#949ba4]" />
+        <h2 className="min-w-0 flex-1 truncate font-semibold text-[#f2f3f5]">{display.name}</h2>
+        <button
+          onClick={() => setInCall((v) => !v)}
+          title={inCall ? 'End call' : 'Start voice call'}
+          className="flex items-center gap-1.5 rounded px-2 py-1 text-sm font-medium"
+          style={{ color: inCall ? '#f23f43' : '#b5bac1' }}
+        >
+          <Phone size={20} />
+        </button>
+        <Bell size={20} className="text-[#b5bac1]" />
+      </header>
+
+      {inCall ? (
+        <VoiceChannel
+          channelId={DM_CALL_OFFSET + conv.id}
+          channelName={`Call with ${display.name}`}
+          userId={userId}
+          userName={myName}
+        />
+      ) : (
+        <div className="flex min-h-0 flex-1 flex-col">
+          <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 py-4">
+            <div className="mb-6">
+              <Avatar initials={display.initials} accent={display.accent} size="xl" />
+              <h1 className="mt-4 text-3xl font-bold text-white">{display.name}</h1>
+              <p className="mt-2 text-sm text-[#b5bac1]">
+                This is the beginning of your direct message history with {display.name}.
+              </p>
+            </div>
+
+            {loading && <p className="py-4 text-center text-xs text-[#949ba4]">Loading messages…</p>}
+
+            <div className="space-y-3">
+              {messages.map((message) => {
+                const isMe = message.userId === userId;
+                const time = new Date(message.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                return (
+                  <div key={message.id} className="flex gap-3">
+                    <Avatar
+                      initials={(isMe ? myName : message.userName).slice(0, 2).toUpperCase()}
+                      accent={isMe ? '#5865f2' : display.accent}
+                      size="md"
+                    />
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium text-[#f2f3f5]">
+                        {isMe ? myName : message.userName}{' '}
+                        <span className="text-xs font-normal text-[#949ba4]">{time}</span>
+                      </p>
+                      <p className="text-sm leading-relaxed text-[#dbdee1]">{message.content}</p>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          <div className="px-4 pb-6">
+            <div className="flex h-11 items-center gap-3 rounded-lg bg-[#383a40] px-3">
+              <button className="flex h-5 w-5 items-center justify-center rounded-full bg-[#b5bac1] text-[#383a40]" title="Add attachment">
+                <Plus size={14} />
+              </button>
+              <input
+                value={draft}
+                onChange={(e) => setDraft(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter') send(); }}
+                className="min-w-0 flex-1 bg-transparent text-sm text-[#dbdee1] outline-none placeholder:text-[#949ba4]"
+                placeholder={`Message ${other?.name ?? display.name}`}
+              />
+              <button onClick={send} className="text-[#b5bac1] hover:text-[#f2f3f5]" title="Send message">
+                <Send size={18} />
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+
+function FriendsPanel({
+  friends,
+  onAddFriend,
+  onAccept,
+  onRemove,
+  onMessage,
+}: {
+  friends: FriendsState;
+  onAddFriend: (name: string) => void;
+  onAccept: (id: number) => void;
+  onRemove: (id: number) => void;
+  onMessage: (userId: number) => void;
+}) {
+  const [name, setName] = useState('');
+
+  return (
+    <>
+      <header className="flex h-12 flex-shrink-0 items-center gap-3 border-b border-black/40 px-4">
+        <UsersRound size={20} className="text-[#b5bac1]" />
+        <span className="font-semibold text-[#f2f3f5]">Friends</span>
+      </header>
+
+      <div className="flex-1 overflow-y-auto p-6">
+        <div className="mb-8 max-w-xl">
+          <h3 className="text-xs font-bold uppercase tracking-wide text-[#b5bac1]">Add Friend</h3>
+          <p className="mt-1 text-sm text-[#949ba4]">You can add friends by their display name.</p>
+          <form
+            onSubmit={(e) => { e.preventDefault(); onAddFriend(name); setName(''); }}
+            className="mt-3 flex items-center gap-2 rounded-lg border border-black/40 bg-[#1e1f22] px-3 py-2"
+          >
+            <input
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="Enter a display name"
+              className="min-w-0 flex-1 bg-transparent text-sm text-[#dbdee1] outline-none placeholder:text-[#949ba4]"
+            />
+            <button
+              type="submit"
+              disabled={!name.trim()}
+              className="flex items-center gap-1.5 rounded bg-[#5865f2] px-3 py-1.5 text-sm font-semibold text-white hover:bg-[#4752c4] disabled:opacity-50"
+            >
+              <UserPlus size={15} /> Send Request
+            </button>
+          </form>
+        </div>
+
+        {friends.incoming.length > 0 && (
+          <FriendSection title={`Pending — ${friends.incoming.length}`}>
+            {friends.incoming.map((f) => (
+              <FriendRow key={f.friendshipId} friend={f}>
+                <span className="mr-2 text-xs text-[#949ba4]">Incoming request</span>
+                <IconBtn title="Accept" onClick={() => onAccept(f.friendshipId)} color="#23a55a">
+                  <Check size={18} />
+                </IconBtn>
+                <IconBtn title="Decline" onClick={() => onRemove(f.friendshipId)} color="#f23f43">
+                  <X size={18} />
+                </IconBtn>
+              </FriendRow>
+            ))}
+          </FriendSection>
+        )}
+
+        {friends.outgoing.length > 0 && (
+          <FriendSection title={`Outgoing — ${friends.outgoing.length}`}>
+            {friends.outgoing.map((f) => (
+              <FriendRow key={f.friendshipId} friend={f}>
+                <span className="mr-2 text-xs text-[#949ba4]">Pending…</span>
+                <IconBtn title="Cancel" onClick={() => onRemove(f.friendshipId)} color="#f23f43">
+                  <X size={18} />
+                </IconBtn>
+              </FriendRow>
+            ))}
+          </FriendSection>
+        )}
+
+        <FriendSection title={`All Friends — ${friends.friends.length}`}>
+          {friends.friends.length === 0 && (
+            <p className="py-6 text-sm text-[#949ba4]">No friends yet. Add someone above to get started.</p>
+          )}
+          {friends.friends.map((f) => (
+            <FriendRow key={f.friendshipId} friend={f}>
+              <IconBtn title="Message" onClick={() => onMessage(f.userId)} color="#b5bac1">
+                <MessageSquarePlus size={18} />
+              </IconBtn>
+              <IconBtn title="Remove friend" onClick={() => onRemove(f.friendshipId)} color="#f23f43">
+                <X size={18} />
+              </IconBtn>
+            </FriendRow>
+          ))}
+        </FriendSection>
+      </div>
+    </>
+  );
+}
+
+function FriendSection({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <div className="mb-6">
+      <h3 className="mb-2 border-b border-black/30 pb-2 text-xs font-bold uppercase tracking-wide text-[#b5bac1]">
+        {title}
+      </h3>
+      {children}
+    </div>
+  );
+}
+
+function FriendRow({ friend, children }: { friend: Friend; children: React.ReactNode }) {
+  return (
+    <div className="flex items-center gap-3 rounded px-2 py-2 hover:bg-[#35373c]">
+      <Avatar initials={friend.name.slice(0, 2).toUpperCase()} accent={accentFor(friend.userId)} size="md" online={friend.status === 'online'} />
+      <div className="min-w-0 flex-1">
+        <p className="truncate text-sm font-semibold text-[#f2f3f5]">{friend.name}</p>
+        <p className="truncate text-xs text-[#949ba4] capitalize">{friend.status}</p>
+      </div>
+      <div className="flex items-center gap-2">{children}</div>
+    </div>
+  );
+}
+
+function IconBtn({ title, onClick, color, children }: { title: string; onClick: () => void; color: string; children: React.ReactNode }) {
+  return (
+    <button
+      title={title}
+      onClick={onClick}
+      className="flex h-9 w-9 items-center justify-center rounded-full bg-[#2b2d31] hover:bg-[#1e1f22]"
+      style={{ color }}
+    >
+      {children}
+    </button>
+  );
+}
+
+function ServerRail({ servers, onSelectServer }: { servers: Server[]; onSelectServer: (id: number) => void }) {
+  const router = useRouter();
+  return (
     <aside className="hidden w-[72px] flex-col items-center gap-2 bg-[#1e1f22] py-3 md:flex overflow-y-auto no-scrollbar">
-      {/* Home button – active on DM page */}
       <div className="relative flex w-full items-center justify-center">
         <span className="absolute left-0 h-10 w-1 rounded-r-full bg-white" />
         <button
@@ -261,18 +645,15 @@ function ServerRail({
 
       {servers.length > 0 && <Divider />}
 
-      {servers.map(server => {
+      {servers.map((server) => {
         const initials = server.name.slice(0, 2).toUpperCase();
         return (
-          <ServerIconButton
-            key={server.id}
-            title={server.name}
-            onClick={() => onSelectServer(server.id)}
-          >
-            {server.icon
-              ? <img src={server.icon} alt={server.name} className="w-full h-full object-cover rounded-[inherit]" />
-              : <span className="text-xs font-bold text-[#dcddde]">{initials}</span>
-            }
+          <ServerIconButton key={server.id} title={server.name} onClick={() => onSelectServer(server.id)}>
+            {server.icon ? (
+              <img src={server.icon} alt={server.name} className="w-full h-full object-cover rounded-[inherit]" />
+            ) : (
+              <span className="text-xs font-bold text-[#dcddde]">{initials}</span>
+            )}
           </ServerIconButton>
         );
       })}
@@ -290,17 +671,8 @@ function ServerRail({
   );
 }
 
-function ServerIconButton({
-  title,
-  onClick,
-  children,
-}: {
-  title: string;
-  onClick: () => void;
-  children: React.ReactNode;
-}) {
+function ServerIconButton({ title, onClick, children }: { title: string; onClick: () => void; children: React.ReactNode }) {
   const [hovered, setHovered] = useState(false);
-
   return (
     <div
       className="group relative flex w-full items-center justify-center"
@@ -331,10 +703,7 @@ function Tooltip({ label }: { label: string }) {
       style={{ background: '#111214', color: '#F2F3F5' }}
     >
       {label}
-      <div
-        className="absolute right-full top-1/2 -translate-y-1/2 border-4 border-transparent"
-        style={{ borderRightColor: '#111214' }}
-      />
+      <div className="absolute right-full top-1/2 -translate-y-1/2 border-4 border-transparent" style={{ borderRightColor: '#111214' }} />
     </div>
   );
 }
@@ -347,7 +716,25 @@ function Divider() {
   );
 }
 
-function DirectSidebar({ requestCount }: { requestCount: number }) {
+function DirectSidebar({
+  userId,
+  view,
+  conversations,
+  selectedConvId,
+  requestBadge,
+  onShowFriends,
+  onShowRequests,
+  onSelectConv,
+}: {
+  userId: number;
+  view: View;
+  conversations: Conversation[];
+  selectedConvId: number | null;
+  requestBadge: number;
+  onShowFriends: () => void;
+  onShowRequests: () => void;
+  onSelectConv: (id: number) => void;
+}) {
   return (
     <aside className="hidden w-60 flex-shrink-0 flex-col bg-[#2b2d31] md:flex">
       <div className="p-3">
@@ -361,32 +748,41 @@ function DirectSidebar({ requestCount }: { requestCount: number }) {
       </div>
 
       <nav className="space-y-1 px-2">
-        <SideNavItem icon={<UsersRound size={20} />} label="Friends" />
-        <SideNavItem icon={<Gamepad2 size={20} />} label="Nitro" />
-        <SideNavItem icon={<Mail size={20} />} label="Message Requests" active badge={requestCount} />
+        <SideNavItem icon={<UsersRound size={20} />} label="Friends" active={view === 'friends'} onClick={onShowFriends} />
+        <SideNavItem icon={<Gamepad2 size={20} />} label="Nitro" onClick={() => {}} />
+        <SideNavItem icon={<Mail size={20} />} label="Message Requests" active={view === 'requests'} badge={requestBadge} onClick={onShowRequests} />
       </nav>
 
       <div className="mt-6 flex items-center justify-between px-4 text-xs font-bold uppercase tracking-wide text-[#b5bac1]">
         <span>Direct Messages</span>
-        <button className="text-[#949ba4] hover:text-[#dbdee1]" title="Create DM">
+        <button onClick={onShowFriends} className="text-[#949ba4] hover:text-[#dbdee1]" title="Create DM">
           <MessageSquarePlus size={15} />
         </button>
       </div>
 
-      <div className="mt-2 space-y-1 px-2">
-        {directMessages.map(dm => (
-          <button
-            key={dm.id}
-            className="flex h-[46px] w-full items-center gap-3 rounded px-2 text-left transition-colors hover:bg-[#35373c]"
-          >
-            <Avatar initials={dm.initials} accent={dm.accent} size="sm" online={dm.status !== '9 Members'} />
-            <div className="min-w-0 flex-1">
-              <p className="truncate text-sm font-medium text-[#b5bac1]">{dm.name}</p>
-              <p className="truncate text-xs text-[#949ba4]">{dm.status}</p>
-            </div>
-            {dm.unread && <span className="h-2 w-2 rounded-full bg-[#f2f3f5]" />}
-          </button>
-        ))}
+      <div className="mt-2 flex-1 space-y-1 overflow-y-auto px-2">
+        {conversations.length === 0 && (
+          <p className="px-2 py-3 text-xs text-[#949ba4]">No conversations yet. Message a friend to start one.</p>
+        )}
+        {conversations.map((conv) => {
+          const display = convDisplay(conv, userId);
+          return (
+            <button
+              key={conv.id}
+              onClick={() => onSelectConv(conv.id)}
+              className="flex h-[46px] w-full items-center gap-3 rounded px-2 text-left transition-colors hover:bg-[#35373c]"
+              style={{ background: selectedConvId === conv.id ? '#35373c' : 'transparent' }}
+            >
+              <Avatar initials={display.initials} accent={display.accent} size="sm" online={display.status === 'online'} />
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-sm font-medium text-[#dbdee1]">{display.name}</p>
+                <p className="truncate text-xs text-[#949ba4]">
+                  {conv.lastMessage ? conv.lastMessage.content : display.isGroup ? display.status : 'Start chatting'}
+                </p>
+              </div>
+            </button>
+          );
+        })}
       </div>
     </aside>
   );
@@ -397,14 +793,17 @@ function SideNavItem({
   label,
   active,
   badge,
+  onClick,
 }: {
   icon: React.ReactNode;
   label: string;
   active?: boolean;
   badge?: number;
+  onClick: () => void;
 }) {
   return (
     <button
+      onClick={onClick}
       className="flex h-10 w-full items-center gap-3 rounded px-3 text-left text-[#b5bac1] transition-colors hover:bg-[#35373c] hover:text-[#f2f3f5]"
       style={{ background: active ? '#404249' : 'transparent', color: active ? '#f2f3f5' : undefined }}
     >
@@ -502,24 +901,12 @@ function RequestRow({
   );
 }
 
-function MessagePreview({
+function RequestPreview({
   request,
-  messages,
-  loadingMessages,
-  userId,
-  draft,
-  onDraftChange,
-  onSend,
   onAccept,
   onReport,
 }: {
   request: MessageRequest;
-  messages: ApiMessage[];
-  loadingMessages: boolean;
-  userId: number;
-  draft: string;
-  onDraftChange: (value: string) => void;
-  onSend: () => void;
   onAccept: () => void;
   onReport: () => void;
 }) {
@@ -560,51 +947,6 @@ function MessagePreview({
             </button>
           </div>
         </div>
-
-        <div className="space-y-4 border-t border-black/30 pt-5">
-          {loadingMessages && (
-            <div className="flex items-center justify-center py-4">
-              <span className="text-xs text-[#949ba4]">Loading messages…</span>
-            </div>
-          )}
-          {!loadingMessages && messages.map((message) => {
-            const isMe = message.userId === userId;
-            const time = new Date(message.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-            return (
-              <div key={message.id} className="flex gap-3">
-                <Avatar
-                  initials={isMe ? 'YO' : request.initials}
-                  accent={isMe ? '#5865f2' : request.accent}
-                  size="md"
-                />
-                <div className="min-w-0">
-                  <p className="text-sm font-medium text-[#f2f3f5]">
-                    {message.userName} <span className="text-xs font-normal text-[#949ba4]">{time}</span>
-                  </p>
-                  <p className="text-sm leading-relaxed text-[#dbdee1]">{message.content}</p>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-
-        <div className="mt-4 flex h-11 items-center gap-3 rounded-lg bg-[#383a40] px-3">
-          <button className="flex h-5 w-5 items-center justify-center rounded-full bg-[#b5bac1] text-[#383a40]" title="Add attachment">
-            <MessageSquarePlus size={13} />
-          </button>
-          <input
-            value={draft}
-            onChange={event => onDraftChange(event.target.value)}
-            onKeyDown={event => {
-              if (event.key === 'Enter') onSend();
-            }}
-            className="min-w-0 flex-1 bg-transparent text-sm text-[#dbdee1] outline-none placeholder:text-[#949ba4]"
-            placeholder={`Message ${request.name}`}
-          />
-          <button onClick={onSend} className="text-[#b5bac1] hover:text-[#f2f3f5]" title="Send message">
-            <UserRound size={20} />
-          </button>
-        </div>
       </div>
     </aside>
   );
@@ -635,9 +977,7 @@ function Avatar({
       >
         {initials}
       </div>
-      {online && (
-        <span className="absolute bottom-0 right-0 h-3.5 w-3.5 rounded-full border-2 border-[#313338] bg-[#23a55a]" />
-      )}
+      {online && <span className="absolute bottom-0 right-0 h-3.5 w-3.5 rounded-full border-2 border-[#313338] bg-[#23a55a]" />}
     </div>
   );
 }

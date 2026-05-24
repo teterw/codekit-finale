@@ -2,9 +2,12 @@ import { db } from '@/db';
 import { directConversations, directConversationMembers, directMessages, users } from '@/db/schema';
 import { and, desc, eq, lt } from 'drizzle-orm';
 import { errorResponse, getUserId, jsonResponse } from '@/lib/api-helpers';
+import { getPusherServer } from '@/lib/pusher';
+import { ensureDmTables } from '../route';
 
 export async function GET(request: Request, { params }: { params: Promise<{ conversationId: string }> }) {
   try {
+    await ensureDmTables();
     const userId = getUserId(request);
     if (!userId) return errorResponse('Missing x-user-id header', 401);
 
@@ -53,6 +56,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ conv
 
 export async function POST(request: Request, { params }: { params: Promise<{ conversationId: string }> }) {
   try {
+    await ensureDmTables();
     const userId = getUserId(request);
     if (!userId) return errorResponse('Missing x-user-id header', 401);
 
@@ -85,10 +89,13 @@ export async function POST(request: Request, { params }: { params: Promise<{ con
       .values({ conversationId: convId, userId, content })
       .returning();
 
-    return jsonResponse(
-      { message: { ...created, userName: sender?.name ?? 'Unknown', userAvatar: sender?.avatar ?? null } },
-      201,
-    );
+    const message = { ...created, userName: sender?.name ?? 'Unknown', userAvatar: sender?.avatar ?? null };
+
+    try {
+      await getPusherServer().trigger(`dm-${convId}`, 'dm-message', message);
+    } catch { /* Pusher not configured */ }
+
+    return jsonResponse({ message }, 201);
   } catch {
     return errorResponse('Unable to create message', 500);
   }
