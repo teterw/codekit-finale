@@ -1,4 +1,4 @@
-import { db, ensureSchema } from '@/db';
+import { db, ensureProfileColumns } from '@/db';
 import { users } from '@/db/schema';
 import { eq } from 'drizzle-orm';
 import { errorResponse, hashPassword, jsonResponse } from '@/lib/api-helpers';
@@ -21,9 +21,9 @@ export async function POST(request: Request) {
       return errorResponse('name, email, and password are required', 400);
     }
 
-    await ensureSchema();
+    await ensureProfileColumns();
 
-    const existing = await db.select().from(users).where(eq(users.email, email)).limit(1);
+    const existing = await db.select({ id: users.id }).from(users).where(eq(users.email, email)).limit(1);
     if (existing.length > 0) {
       return errorResponse('Email is already registered', 409);
     }

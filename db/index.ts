@@ -23,6 +23,8 @@ export function ensureProfileColumns(): Promise<void> {
     try { await db.execute(sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS username text`); } catch {}
     try { await db.execute(sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS bio text`); } catch {}
     try { await db.execute(sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS updated_at timestamp`); } catch {}
+    try { await db.execute(sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar text`); } catch {}
+    try { await db.execute(sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS status text NOT NULL DEFAULT 'offline'`); } catch {}
     try {
       await db.execute(
         sql`CREATE UNIQUE INDEX IF NOT EXISTS users_username_unique ON users(username) WHERE username IS NOT NULL`,
