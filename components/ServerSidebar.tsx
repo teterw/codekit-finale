@@ -1,8 +1,11 @@
 'use client';
 
+import { useEffect, useState } from 'react';
+import { useParams, useRouter } from 'next/navigation';
+
 interface Server { id: number; name: string; icon: string | null; ownerId: number; }
 
-interface Props {
+interface ControlledProps {
   servers: Server[];
   selectedId: number | null;
   onSelect: (server: Server) => void;
@@ -10,7 +13,45 @@ interface Props {
   onJoinServer: () => void;
 }
 
-export default function ServerSidebar({ servers, selectedId, onSelect, onAddServer, onJoinServer }: Props) {
+interface RoutedProps {
+  userId: number;
+}
+
+type Props = ControlledProps | RoutedProps;
+
+export default function ServerSidebar(props: Props) {
+  if ('userId' in props) {
+    return <RoutedServerSidebar userId={props.userId} />;
+  }
+
+  return <ServerSidebarView {...props} />;
+}
+
+function RoutedServerSidebar({ userId }: RoutedProps) {
+  const router = useRouter();
+  const params = useParams();
+  const selectedId = params?.serverId ? Number(params.serverId) : null;
+  const [servers, setServers] = useState<Server[]>([]);
+
+  useEffect(() => {
+    fetch('/api/servers', { headers: { 'x-user-id': String(userId) } })
+      .then(res => (res.ok ? res.json() : { servers: [] }))
+      .then(data => setServers(data.servers ?? []))
+      .catch(() => setServers([]));
+  }, [userId]);
+
+  return (
+    <ServerSidebarView
+      servers={servers}
+      selectedId={selectedId}
+      onSelect={server => router.push(`/channels/${server.id}`)}
+      onAddServer={() => router.push('/channels')}
+      onJoinServer={() => router.push('/channels')}
+    />
+  );
+}
+
+function ServerSidebarView({ servers, selectedId, onSelect, onAddServer, onJoinServer }: ControlledProps) {
   return (
     <div className="flex flex-col items-center gap-2 py-3 w-[72px] min-w-[72px] bg-[#202225] overflow-y-auto">
       {servers.map(server => {

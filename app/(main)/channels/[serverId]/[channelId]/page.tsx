@@ -1,15 +1,35 @@
 import { getServerSession } from 'next-auth';
+import { notFound } from 'next/navigation';
 import { authOptions } from '@/lib/auth';
+import { db } from '@/db';
+import { channels } from '@/db/schema';
+import { and, eq } from 'drizzle-orm';
 import ChatArea from '@/components/ChatArea';
 
 export default async function ChannelPage({
   params,
 }: {
-  params: { serverId: string; channelId: string };
+  params: Promise<{ serverId: string; channelId: string }>;
 }) {
   const session = await getServerSession(authOptions);
-  const channelId = Number(params.channelId);
+  const { serverId, channelId } = await params;
+  const serverIdNumber = Number(serverId);
+  const channelIdNumber = Number(channelId);
   const userId = Number(session?.user?.id ?? 0);
 
-  return <ChatArea channelId={channelId} userId={userId} />;
+  if (Number.isNaN(serverIdNumber) || Number.isNaN(channelIdNumber)) {
+    notFound();
+  }
+
+  const [channel] = await db
+    .select({ name: channels.name })
+    .from(channels)
+    .where(and(eq(channels.id, channelIdNumber), eq(channels.serverId, serverIdNumber)))
+    .limit(1);
+
+  if (!channel) {
+    notFound();
+  }
+
+  return <ChatArea channelId={channelIdNumber} channelName={channel.name} userId={userId} />;
 }

@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState, useCallback } from 'react';
 import MessageItem from './MessageItem';
-import { getPusherClient } from '@/lib/pusher';
+import { getPusherClient } from '@/lib/pusher-client';
 
 interface Message {
   id: number;
@@ -18,7 +18,7 @@ interface Props {
   channelId: number;
   channelName: string;
   userId: number;
-  onOpenSearch: () => void;
+  onOpenSearch?: () => void;
 }
 
 export default function ChatArea({ channelId, channelName, userId, onOpenSearch }: Props) {
@@ -118,13 +118,15 @@ export default function ChatArea({ channelId, channelName, userId, onOpenSearch 
           <span className="text-[#8e9297] text-lg">#</span>
           <h3 className="text-white font-semibold">{channelName}</h3>
         </div>
-        <button
-          onClick={onOpenSearch}
-          className="text-[#8e9297] hover:text-white transition-colors"
-          title="Search messages"
-        >
+        {onOpenSearch && (
+          <button
+            onClick={onOpenSearch}
+            className="text-[#8e9297] hover:text-white transition-colors"
+            title="Search messages"
+          >
           🔍
-        </button>
+          </button>
+        )}
       </div>
 
       <div ref={listRef} className="flex-1 overflow-y-auto py-4">
