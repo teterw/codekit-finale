@@ -75,6 +75,18 @@ export default function MainApp() {
     }
   }, []);
 
+  const refreshServerMembers = useCallback(async () => {
+    if (!userId || !selectedServer) return;
+    const res = await fetch(`/api/servers/${selectedServer.id}`, { headers: { 'x-user-id': String(userId) } });
+    if (!res.ok) return;
+    const data = await res.json();
+    setMembers(data.members ?? []);
+    if (data.server) {
+      setSelectedServer(data.server);
+      setServers(prev => prev.map(s => (s.id === data.server.id ? data.server : s)));
+    }
+  }, [userId, selectedServer]);
+
   useEffect(() => {
     if (!userId) return;
     let cancelled = false;
@@ -450,6 +462,9 @@ export default function MainApp() {
               serverName={selectedServer.name}
               ownerId={selectedServer.ownerId}
               members={members}
+              currentUserId={userId}
+              serverId={selectedServer.id}
+              onChanged={refreshServerMembers}
               onClose={() => setShowMembersPanel(false)}
             />
           </motion.aside>
@@ -477,6 +492,9 @@ export default function MainApp() {
                 serverName={selectedServer.name}
                 ownerId={selectedServer.ownerId}
                 members={members}
+                currentUserId={userId}
+                serverId={selectedServer.id}
+                onChanged={refreshServerMembers}
                 onClose={() => setShowMembersPanel(false)}
               />
             </motion.div>
