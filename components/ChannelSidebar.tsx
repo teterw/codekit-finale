@@ -1,5 +1,6 @@
 'use client';
 import { useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Hash, Volume2, UserPlus, Copy, Check, ChevronDown, LogOut, Settings } from 'lucide-react';
 import { getPusherClient } from '@/lib/pusher-client';
@@ -31,15 +32,14 @@ interface Props {
   onSelectChannel: (channel: Channel) => void;
   onCreateInvite: () => void;
   onLogout: () => void;
-  onOpenProfileSettings?: () => void;
-  onViewOwnProfile?: () => void;
 }
 
 export default function ChannelSidebar({
   server, channels, selectedChannelId, userId, userName,
   userAvatar, userStatus,
-  onSelectChannel, onLogout, onOpenProfileSettings, onViewOwnProfile,
+  onSelectChannel, onLogout,
 }: Props) {
+  const router = useRouter();
   const [inviteCode, setInviteCode] = useState('');
   const [copied, setCopied] = useState(false);
   const [showInvite, setShowInvite] = useState(false);
@@ -194,7 +194,7 @@ export default function ChannelSidebar({
         style={{ background: 'var(--bg-sidebar)', borderTop: '1px solid var(--border)' }}
       >
         <button
-          onClick={onViewOwnProfile}
+          onClick={() => router.push(`/profile/${userId}`)}
           className="relative flex-shrink-0 rounded-full transition-opacity hover:opacity-80"
           title="View profile"
         >
@@ -224,7 +224,7 @@ export default function ChannelSidebar({
           </p>
         </div>
         <button
-          onClick={onOpenProfileSettings}
+          onClick={() => router.push('/settings/profile')}
           title="Profile settings"
           className="p-1.5 rounded-md transition-colors hover:bg-white/10 flex-shrink-0"
           style={{ color: 'var(--text-3)' }}
