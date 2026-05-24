@@ -1,4 +1,4 @@
-import { db, ensureProfileColumns } from '@/db';
+import { db } from '@/db';
 import { users } from '@/db/schema';
 import { and, eq, ne } from 'drizzle-orm';
 import { errorResponse, getUserId, jsonResponse } from '@/lib/api-helpers';
@@ -10,6 +10,8 @@ export async function GET(request: Request) {
     if (!userId) return errorResponse('Unauthorized', 401);
 
     await ensureProfileColumns();
+  const userId = getUserId(request);
+  if (!userId) return errorResponse('Unauthorized', 401);
 
     const [user] = await db
       .select({
@@ -37,8 +39,6 @@ export async function GET(request: Request) {
 export async function PATCH(request: Request) {
   const userId = getUserId(request);
   if (!userId) return errorResponse('Unauthorized', 401);
-
-  await ensureProfileColumns();
 
   const body = (await request.json()) as {
     name?: string;

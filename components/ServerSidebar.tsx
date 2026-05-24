@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { motion } from 'framer-motion';
-import { Compass, Plus } from 'lucide-react';
+import { Compass, MessageSquare, Plus } from 'lucide-react';
 
 interface Server {
   id: number;
@@ -18,6 +18,8 @@ interface ControlledProps {
   onSelect: (server: Server) => void;
   onAddServer: () => void;
   onJoinServer: () => void;
+  onOpenDMs?: () => void;
+  dmActive?: boolean;
 }
 
 interface RoutedProps {
@@ -35,6 +37,7 @@ function RoutedServerSidebar({ userId }: RoutedProps) {
   const router   = useRouter();
   const params   = useParams();
   const selectedId = params?.serverId ? Number(params.serverId) : null;
+  const isDmPage = typeof window !== 'undefined' && window.location.pathname.startsWith('/direct-messages');
   const [servers, setServers] = useState<Server[]>([]);
 
   useEffect(() => {
@@ -48,7 +51,9 @@ function RoutedServerSidebar({ userId }: RoutedProps) {
     <ServerSidebarView
       servers={servers}
       selectedId={selectedId}
+      dmActive={isDmPage}
       onSelect={server => router.push(`/channels/${server.id}`)}
+      onOpenDMs={() => router.push('/direct-messages')}
       onAddServer={() => router.push('/channels')}
       onJoinServer={() => router.push('/channels')}
     />
@@ -179,13 +184,50 @@ function Divider() {
   );
 }
 
+/* ── DM Home button ──────────────────────────── */
+function DMHomeButton({ active, onClick }: { active: boolean; onClick: () => void }) {
+  const [hovered, setHovered] = useState(false);
+  return (
+    <div
+      className="relative flex items-center w-full"
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+    >
+      <Pill selected={active} hovered={hovered && !active} />
+      <motion.button
+        onClick={onClick}
+        title="Direct Messages"
+        animate={{
+          borderRadius: active || hovered ? '30%' : '50%',
+          scale: hovered ? 1.05 : 1,
+        }}
+        whileTap={{ scale: 0.93 }}
+        transition={{ duration: 0.15 }}
+        className="mx-auto w-12 h-12 flex items-center justify-center"
+        style={{
+          background: active ? 'var(--accent)' : '#36393F',
+          color: active ? '#fff' : '#DCDDDE',
+          boxShadow: active ? '0 0 0 3px var(--accent), 0 2px 8px rgba(0,0,0,0.4)' : undefined,
+        }}
+      >
+        <MessageSquare size={22} strokeWidth={2} />
+      </motion.button>
+      <Tooltip label="Direct Messages" />
+    </div>
+  );
+}
+
 /* ── Main sidebar view ───────────────────────── */
-function ServerSidebarView({ servers, selectedId, onSelect, onAddServer, onJoinServer }: ControlledProps) {
+function ServerSidebarView({ servers, selectedId, dmActive, onSelect, onOpenDMs, onAddServer, onJoinServer }: ControlledProps) {
   return (
     <div
       className="flex flex-col items-center gap-2 py-3 w-[72px] min-w-[72px] overflow-y-auto no-scrollbar"
       style={{ background: 'var(--bg-sidebar)' }}
     >
+      <DMHomeButton active={!!dmActive} onClick={onOpenDMs ?? (() => {})} />
+
+      <Divider />
+
       {servers.map(server => (
         <ServerIcon
           key={server.id}
