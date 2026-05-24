@@ -2,7 +2,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { AnimatePresence, motion } from 'framer-motion';
-import { Check, Copy, Edit2, Hash, LogOut, MicOff, Plus, Settings, UserPlus, Volume2, X } from 'lucide-react';
+import { Check, Copy, Edit2, Hash, LogOut, MicOff, MoreVertical, Pencil, Plus, Settings, Trash2, UserPlus, Volume2, X } from 'lucide-react';
 import { getPusherClient } from '@/lib/pusher-client';
 import EditServerModal from './EditServerModal';
 
@@ -45,6 +45,8 @@ interface Props {
   onServerUpdated: (server: Server) => void;
   onServerDeleted: (serverId: number) => void;
   onChannelCreated?: (channel: Channel) => void;
+  onChannelRenamed?: (channel: Channel) => void;
+  onChannelDeleted?: (channelId: number) => void;
 }
 
 export default function ChannelSidebar({
@@ -62,6 +64,8 @@ export default function ChannelSidebar({
   onServerUpdated,
   onServerDeleted,
   onChannelCreated,
+  onChannelRenamed,
+  onChannelDeleted,
 }: Props) {
   const router = useRouter();
   const [inviteCode, setInviteCode] = useState('');
@@ -76,6 +80,12 @@ export default function ChannelSidebar({
   const [createLoading, setCreateLoading] = useState(false);
   const [createError, setCreateError] = useState('');
   const createInputRef = useRef<HTMLInputElement>(null);
+  const [menuChannelId, setMenuChannelId] = useState<number | null>(null);
+  const [renamingChannelId, setRenamingChannelId] = useState<number | null>(null);
+  const [renameValue, setRenameValue] = useState('');
+  const [renameLoading, setRenameLoading] = useState(false);
+  const [renameError, setRenameError] = useState('');
+  const renameInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => { setLocalName(userName); }, [userName]);
   useEffect(() => { setLocalAvatar(userAvatar ?? null); }, [userAvatar]);
@@ -185,6 +195,47 @@ export default function ChannelSidebar({
     }
   }
 
+  function openRename(channel: Channel) {
+    setMenuChannelId(null);
+    setRenamingChannelId(channel.id);
+    setRenameValue(channel.name);
+    setRenameError('');
+    setTimeout(() => renameInputRef.current?.focus(), 50);
+  }
+
+  async function handleRename(channelId: number) {
+    const name = renameValue.trim();
+    if (!name) { setRenameError('Name is required'); return; }
+    setRenameLoading(true);
+    setRenameError('');
+    try {
+      const res = await fetch(`/api/channels/${channelId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', 'x-user-id': String(userId) },
+        body: JSON.stringify({ name }),
+      });
+      const data = await res.json();
+      if (!res.ok) { setRenameError(data.error ?? 'Failed to rename'); return; }
+      onChannelRenamed?.(data.channel);
+      setRenamingChannelId(null);
+    } catch {
+      setRenameError('Network error');
+    } finally {
+      setRenameLoading(false);
+    }
+  }
+
+  async function handleDelete(channelId: number) {
+    setMenuChannelId(null);
+    try {
+      const res = await fetch(`/api/channels/${channelId}`, {
+        method: 'DELETE',
+        headers: { 'x-user-id': String(userId) },
+      });
+      if (res.ok) onChannelDeleted?.(channelId);
+    } catch { /* ignore */ }
+  }
+
   async function generateInvite() {
     if (!server) return;
     const res = await fetch('/api/invite', {
@@ -246,10 +297,30 @@ export default function ChannelSidebar({
         )}
       </div>
 
-      <div className="flex-1 overflow-y-auto px-2 py-2">
+      <div className="flex-1 overflow-y-auto px-2 py-2" onClick={() => setMenuChannelId(null)}>
         <ChannelGroup label="Text Channels" onAdd={() => openCreate('text')}>
           {textChannels.map(ch => (
-            <ChannelRow key={ch.id} channel={ch} selected={ch.id === selectedChannelId} onClick={() => onSelectChannel(ch)} icon={<Hash size={15} />} />
+            <ChannelRow
+              key={ch.id}
+              channel={ch}
+              selected={ch.id === selectedChannelId}
+              onClick={() => onSelectChannel(ch)}
+              icon={<Hash size={15} />}
+              canManage={canManageServer}
+              menuOpen={menuChannelId === ch.id}
+              onMenuOpen={e => { e.stopPropagation(); setMenuChannelId(ch.id); }}
+              onMenuClose={() => setMenuChannelId(null)}
+              onRenameStart={() => openRename(ch)}
+              onDelete={() => handleDelete(ch.id)}
+              isRenaming={renamingChannelId === ch.id}
+              renameValue={renameValue}
+              onRenameChange={setRenameValue}
+              onRenameSubmit={() => handleRename(ch.id)}
+              onRenameCancel={() => { setRenamingChannelId(null); setRenameError(''); }}
+              renameLoading={renameLoading}
+              renameError={renameError}
+              renameInputRef={renameInputRef}
+            />
           ))}
           {creatingType === 'text' && (
             <CreateChannelForm
@@ -268,7 +339,26 @@ export default function ChannelSidebar({
         <ChannelGroup label="Voice Channels" onAdd={() => openCreate('voice')}>
           {voiceChannels.map(ch => (
             <div key={ch.id}>
-              <ChannelRow channel={ch} selected={ch.id === selectedChannelId} onClick={() => onSelectChannel(ch)} icon={<Volume2 size={15} />} />
+              <ChannelRow
+                channel={ch}
+                selected={ch.id === selectedChannelId}
+                onClick={() => onSelectChannel(ch)}
+                icon={<Volume2 size={15} />}
+                canManage={canManageServer}
+                menuOpen={menuChannelId === ch.id}
+                onMenuOpen={e => { e.stopPropagation(); setMenuChannelId(ch.id); }}
+                onMenuClose={() => setMenuChannelId(null)}
+                onRenameStart={() => openRename(ch)}
+                onDelete={() => handleDelete(ch.id)}
+                isRenaming={renamingChannelId === ch.id}
+                renameValue={renameValue}
+                onRenameChange={setRenameValue}
+                onRenameSubmit={() => handleRename(ch.id)}
+                onRenameCancel={() => { setRenamingChannelId(null); setRenameError(''); }}
+                renameLoading={renameLoading}
+                renameError={renameError}
+                renameInputRef={renameInputRef}
+              />
               {(voiceParticipants[ch.id] ?? []).map(p => (
                 <div key={p.userId} className="flex items-center gap-1.5 pl-7 pr-2 py-0.5 rounded-md select-none">
                   <div className="relative flex-shrink-0 w-4 h-4">
@@ -433,20 +523,110 @@ function CreateChannelForm({
   );
 }
 
-function ChannelRow({ channel, selected, onClick, icon }: { channel: Channel; selected: boolean; onClick: () => void; icon: React.ReactNode; }) {
+interface ChannelRowProps {
+  channel: Channel;
+  selected: boolean;
+  onClick: () => void;
+  icon: React.ReactNode;
+  canManage: boolean;
+  menuOpen: boolean;
+  onMenuOpen: (e: React.MouseEvent) => void;
+  onMenuClose: () => void;
+  onRenameStart: () => void;
+  onDelete: () => void;
+  isRenaming: boolean;
+  renameValue: string;
+  onRenameChange: (v: string) => void;
+  onRenameSubmit: () => void;
+  onRenameCancel: () => void;
+  renameLoading: boolean;
+  renameError: string;
+  renameInputRef: React.RefObject<HTMLInputElement | null>;
+}
+
+function ChannelRow({
+  channel, selected, onClick, icon, canManage,
+  menuOpen, onMenuOpen, onMenuClose, onRenameStart, onDelete,
+  isRenaming, renameValue, onRenameChange, onRenameSubmit, onRenameCancel,
+  renameLoading, renameError, renameInputRef,
+}: ChannelRowProps) {
+  if (isRenaming) {
+    return (
+      <div className="mb-0.5 mx-0 rounded-md px-2 py-1" style={{ background: 'var(--bg-elevated)', border: '1px solid var(--accent)' }}>
+        <form onSubmit={e => { e.preventDefault(); onRenameSubmit(); }} onClick={e => e.stopPropagation()}>
+          <div className="flex items-center gap-1">
+            <span style={{ color: 'var(--accent)', flexShrink: 0 }}>{icon}</span>
+            <input
+              ref={renameInputRef}
+              value={renameValue}
+              onChange={e => onRenameChange(e.target.value.toLowerCase().replace(/[^a-z0-9-_]/g, ''))}
+              maxLength={32}
+              disabled={renameLoading}
+              className="flex-1 text-xs rounded px-1 py-0.5 outline-none min-w-0"
+              style={{ background: 'transparent', color: 'var(--text-1)' }}
+              onKeyDown={e => { if (e.key === 'Escape') onRenameCancel(); }}
+            />
+            <button type="submit" disabled={renameLoading || !renameValue.trim()} className="p-1 rounded hover:bg-white/10 disabled:opacity-40" style={{ color: 'var(--accent)' }}>
+              <Check size={12} />
+            </button>
+            <button type="button" onClick={onRenameCancel} className="p-1 rounded hover:bg-white/10" style={{ color: 'var(--text-3)' }}>
+              <X size={12} />
+            </button>
+          </div>
+          {renameError && <p className="text-xs mt-0.5" style={{ color: 'var(--danger)' }}>{renameError}</p>}
+        </form>
+      </div>
+    );
+  }
+
   return (
-    <motion.button
-      onClick={onClick}
-      whileTap={{ scale: 0.98 }}
-      className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm transition-colors mb-0.5"
-      style={{
-        background: selected ? 'var(--bg-elevated)' : 'transparent',
-        color: selected ? 'var(--text-1)' : 'var(--text-2)',
-        borderLeft: selected ? '2px solid var(--accent)' : '2px solid transparent',
-      }}
-    >
-      <span style={{ color: selected ? 'var(--accent)' : 'var(--text-3)', flexShrink: 0 }}>{icon}</span>
-      <span className="truncate text-sm">{channel.name}</span>
-    </motion.button>
+    <div className="relative group mb-0.5">
+      <div
+        role="button"
+        onClick={onClick}
+        className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm transition-colors cursor-pointer"
+        style={{
+          background: selected ? 'var(--bg-elevated)' : 'transparent',
+          color: selected ? 'var(--text-1)' : 'var(--text-2)',
+          borderLeft: selected ? '2px solid var(--accent)' : '2px solid transparent',
+        }}
+      >
+        <span style={{ color: selected ? 'var(--accent)' : 'var(--text-3)', flexShrink: 0 }}>{icon}</span>
+        <span className="truncate text-sm flex-1">{channel.name}</span>
+        {canManage && (
+          <button
+            onClick={onMenuOpen}
+            className="opacity-0 group-hover:opacity-100 p-0.5 rounded transition-all hover:bg-white/10 flex-shrink-0"
+            style={{ color: 'var(--text-3)' }}
+            title="Channel settings"
+          >
+            <MoreVertical size={13} />
+          </button>
+        )}
+      </div>
+
+      {menuOpen && (
+        <div
+          className="absolute right-1 top-full z-50 rounded-lg shadow-xl py-1 w-40"
+          style={{ background: 'var(--bg-card)', border: '1px solid var(--border)' }}
+          onClick={e => e.stopPropagation()}
+        >
+          <button
+            onClick={() => { onMenuClose(); onRenameStart(); }}
+            className="w-full flex items-center gap-2 px-3 py-1.5 text-xs transition-colors hover:bg-white/10"
+            style={{ color: 'var(--text-1)' }}
+          >
+            <Pencil size={12} /> Rename
+          </button>
+          <button
+            onClick={onDelete}
+            className="w-full flex items-center gap-2 px-3 py-1.5 text-xs transition-colors hover:bg-white/10"
+            style={{ color: 'var(--danger)' }}
+          >
+            <Trash2 size={12} /> Delete Channel
+          </button>
+        </div>
+      )}
+    </div>
   );
 }
