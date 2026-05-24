@@ -10,18 +10,27 @@ import { getPusherServer } from '@/lib/pusher';
 // Everything below therefore touches only the core columns; per-user mute/
 // deafen/speaking/camera state is ephemeral and relayed over Pusher instead.
 
-async function ensureVoiceTable() {
-  try {
-    await db.execute(sql`
-      CREATE TABLE IF NOT EXISTS voice_participants (
-        id SERIAL PRIMARY KEY,
-        channel_id INTEGER NOT NULL,
-        user_id INTEGER NOT NULL,
-        peer_id TEXT NOT NULL,
-        updated_at TIMESTAMP NOT NULL DEFAULT NOW()
-      )
-    `);
-  } catch { /* table already exists or no DDL permission */ }
+const CLEANUP_INTERVAL_MS = 60_000;
+let _lastCleanup = 0;
+
+let _voiceTable: Promise<void> | null = null;
+
+function ensureVoiceTable(): Promise<void> {
+  if (_voiceTable) return _voiceTable;
+  _voiceTable = (async () => {
+    try {
+      await db.execute(sql`
+        CREATE TABLE IF NOT EXISTS voice_participants (
+          id SERIAL PRIMARY KEY,
+          channel_id INTEGER NOT NULL,
+          user_id INTEGER NOT NULL,
+          peer_id TEXT NOT NULL,
+          updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+        )
+      `);
+    } catch { /* table already exists or no DDL permission */ }
+  })();
+  return _voiceTable;
 }
 
 interface ParticipantRow {
@@ -58,8 +67,13 @@ export async function GET(request: Request, { params }: { params: Promise<{ chan
     const channelId = Number(channelIdStr);
     if (Number.isNaN(channelId)) return errorResponse('Invalid channel id', 400);
 
-    // Clean stale participants (older than 10 minutes — PATCH refreshes updated_at on state changes)
-    await db.execute(sql`DELETE FROM voice_participants WHERE updated_at < NOW() - INTERVAL '10 minutes'`);
+    // Clean stale participants (older than 10 minutes — PATCH refreshes updated_at on state changes).
+    // Throttled so a frequently-polled GET doesn't fire a DELETE round-trip every time.
+    const now = Date.now();
+    if (now - _lastCleanup > CLEANUP_INTERVAL_MS) {
+      _lastCleanup = now;
+      await db.execute(sql`DELETE FROM voice_participants WHERE updated_at < NOW() - INTERVAL '10 minutes'`);
+    }
 
     const participants = await getParticipantList(channelId);
     return jsonResponse({ participants });
@@ -121,12 +135,25 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ ch
       isDeafened?: boolean;
       isSpeaking?: boolean;
       isCameraOn?: boolean;
+      soundboard?: { name: string; tone: number };
     };
 
     // Keep the row fresh so the stale-cleanup doesn't drop an active user.
     try {
       await db.execute(sql`UPDATE voice_participants SET updated_at = NOW() WHERE channel_id = ${channelId} AND user_id = ${userId}`);
     } catch { /* best effort */ }
+
+    // Soundboard clips are fire-and-forget: relay to everyone in the channel.
+    if (body.soundboard) {
+      try {
+        await getPusherServer().trigger(`voice-channel-${channelId}`, 'voice-soundboard', {
+          userId,
+          name: body.soundboard.name,
+          tone: body.soundboard.tone,
+        });
+      } catch { /* Pusher not configured */ }
+      return jsonResponse({ success: true });
+    }
 
     // Mute/deafen/speaking/camera aren't persisted (no columns) — relay live.
     try {
