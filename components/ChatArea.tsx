@@ -15,10 +15,14 @@ interface Message {
   userId: number;
   userName: string;
   userAvatar: string | null;
+<<<<<<< HEAD
   replyToId?: number | null;
   replyToContent?: string | null;
   replyToUserName?: string | null;
   isPinned?: boolean;
+=======
+  pending?: boolean;
+>>>>>>> 44d526f851f47154c6f7e63ccc6b88fcd8688c62
 }
 
 type Reaction = { emoji: string; count: number; userReacted: boolean };
@@ -234,6 +238,7 @@ export default function ChatArea({ channelId, channelName, userId, userName, onO
     event?.preventDefault();
     const content = input.trim();
     if (!content || sending) return;
+<<<<<<< HEAD
     const replyToId = replyTarget?.id;
     setSending(true);
     setInput('');
@@ -241,12 +246,47 @@ export default function ChatArea({ channelId, channelName, userId, userName, onO
     if (typingTimerRef.current) clearTimeout(typingTimerRef.current);
     isTypingRef.current = false;
     sendTypingEvent(false);
+=======
+
+    const tempId = Date.now() * -1;
+    const tempMessage: Message = {
+      id: tempId,
+      content,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      userId,
+      userName,
+      userAvatar: null,
+      pending: true,
+    };
+
+    setMessages(prev => [...prev, tempMessage]);
+    setInput('');
+    setSending(true);
+    setTimeout(() => bottomRef.current?.scrollIntoView({ behavior: 'smooth' }), 50);
+
+>>>>>>> 44d526f851f47154c6f7e63ccc6b88fcd8688c62
     try {
-      await fetch(`/api/messages/${channelId}`, {
+      const res = await fetch(`/api/messages/${channelId}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'x-user-id': String(userId) },
         body: JSON.stringify({ content, replyToId }),
       });
+
+      if (res.ok) {
+        const data = await res.json();
+        const message = data.message as Message;
+        setMessages(prev => {
+          if (prev.some(m => m.id === message.id)) {
+            return prev.filter(m => m.id !== tempId);
+          }
+          return prev.map(m => m.id === tempId ? message : m);
+        });
+      } else {
+        setMessages(prev => prev.filter(m => m.id !== tempId));
+      }
+    } catch {
+      setMessages(prev => prev.filter(m => m.id !== tempId));
     } finally {
       setSending(false);
       inputRef.current?.focus();
