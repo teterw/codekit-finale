@@ -156,8 +156,12 @@ export default function ChannelSidebar({
     }
   }
 
+  function inviteUrl() {
+    return `${window.location.origin}/invite/${inviteCode}`;
+  }
+
   function copyCode() {
-    navigator.clipboard.writeText(inviteCode);
+    navigator.clipboard.writeText(inviteUrl());
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   }
@@ -253,9 +257,9 @@ export default function ChannelSidebar({
             {showInvite && inviteCode && (
               <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }} transition={{ duration: 0.2 }} className="overflow-hidden">
                 <div className="mx-1 mt-1 rounded-lg p-3" style={{ background: 'var(--bg-elevated)', border: '1px solid var(--border)' }}>
-                  <p className="text-xs mb-1.5" style={{ color: 'var(--text-3)' }}>Invite code (24h)</p>
+                  <p className="text-xs mb-1.5" style={{ color: 'var(--text-3)' }}>Invite link (24h)</p>
                   <div className="flex items-center gap-2">
-                    <code className="flex-1 text-xs truncate font-mono" style={{ color: 'var(--accent)' }}>{inviteCode}</code>
+                    <code className="flex-1 text-xs truncate font-mono" style={{ color: 'var(--accent)' }}>{inviteUrl()}</code>
                     <button onClick={copyCode} className="flex-shrink-0 transition-colors p-1 rounded" style={{ color: copied ? 'var(--online)' : 'var(--text-3)' }}>
                       {copied ? <Check size={13} /> : <Copy size={13} />}
                     </button>

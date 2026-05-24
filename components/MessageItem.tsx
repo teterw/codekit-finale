@@ -1,5 +1,5 @@
 'use client';
-import { useRef, useState } from 'react';
+import { memo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { AnimatePresence, motion } from 'framer-motion';
 import { Check, MessageCircle, Pencil, Pin, Reply, SmilePlus, Trash2, X } from 'lucide-react';
@@ -51,7 +51,7 @@ function formatTimestamp(date: Date): string {
   return date.toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' });
 }
 
-export default function MessageItem({
+function MessageItem({
   message,
   currentUserId,
   channelId,
@@ -197,11 +197,11 @@ export default function MessageItem({
             </div>
           </div>
         ) : (
-          <div className="text-[15px] leading-[1.375rem] break-words prose prose-invert prose-sm max-w-none" style={{ color: 'var(--text-msg)' }}>
+          <div className="text-[15px] leading-[1.375rem] break-words" style={{ color: 'var(--text-msg)' }}>
             <ReactMarkdown
               remarkPlugins={[remarkGfm]}
               components={{
-                p: ({ children }) => <p className="m-0">{children}</p>,
+                p: ({ children }) => <p style={{ margin: 0 }}>{children}</p>,
                 code: ({ children, className }) => {
                   const isBlock = className?.includes('language-');
                   return (
@@ -326,3 +326,5 @@ export default function MessageItem({
     </div>
   );
 }
+
+export default memo(MessageItem);

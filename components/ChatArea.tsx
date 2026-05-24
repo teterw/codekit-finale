@@ -299,7 +299,7 @@ export default function ChatArea({ channelId, channelName, userId, userName, onO
     }
   }
 
-  async function handleReaction(messageId: number, emoji: string) {
+  const handleReaction = useCallback(async (messageId: number, emoji: string) => {
     try {
       await fetch('/api/reactions', {
         method: 'POST',
@@ -309,7 +309,19 @@ export default function ChatArea({ channelId, channelName, userId, userName, onO
     } catch {
       // Reactions are non-critical.
     }
-  }
+  }, [channelId, userId]);
+
+  const handleUpdated = useCallback((updated: Message) => {
+    setMessages(prev => prev.map(m => (m.id === updated.id ? updated : m)));
+  }, []);
+
+  const handleDeleted = useCallback((id: number) => {
+    setMessages(prev => prev.filter(m => m.id !== id));
+  }, []);
+
+  const handleReply = useCallback((m: Message) => {
+    setReplyTarget({ id: m.id, content: m.content, userName: m.userName });
+  }, []);
 
   function handleDragOver(event: React.DragEvent) {
     event.preventDefault();
@@ -470,9 +482,9 @@ export default function ChatArea({ channelId, channelName, userId, userName, onO
               channelId={channelId}
               isGrouped={isGrouped(messages, i)}
               reactions={reactionsMap[msg.id] ?? []}
-              onUpdated={updated => setMessages(prev => prev.map(m => (m.id === updated.id ? updated : m)))}
-              onDeleted={id => setMessages(prev => prev.filter(m => m.id !== id))}
-              onReply={m => setReplyTarget({ id: m.id, content: m.content, userName: m.userName })}
+              onUpdated={handleUpdated}
+              onDeleted={handleDeleted}
+              onReply={handleReply}
               onReaction={handleReaction}
               onOpenThread={setThreadMessage}
               onViewProfile={onViewProfile}
