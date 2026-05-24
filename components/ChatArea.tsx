@@ -15,6 +15,7 @@ interface Message {
   userId: number;
   userName: string;
   userAvatar: string | null;
+  pending?: boolean;
 }
 
 interface Props {
@@ -152,14 +153,45 @@ export default function ChatArea({ channelId, channelName, userId, userName, onO
     e.preventDefault();
     const content = input.trim();
     if (!content || sending) return;
-    setSending(true);
+
+    const tempId = Date.now() * -1;
+    const tempMessage: Message = {
+      id: tempId,
+      content,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      userId,
+      userName,
+      userAvatar: null,
+      pending: true,
+    };
+
+    setMessages(prev => [...prev, tempMessage]);
     setInput('');
+    setSending(true);
+    setTimeout(() => bottomRef.current?.scrollIntoView({ behavior: 'smooth' }), 50);
+
     try {
-      await fetch(`/api/messages/${channelId}`, {
+      const res = await fetch(`/api/messages/${channelId}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'x-user-id': String(userId) },
         body: JSON.stringify({ content }),
       });
+
+      if (res.ok) {
+        const data = await res.json();
+        const message = data.message as Message;
+        setMessages(prev => {
+          if (prev.some(m => m.id === message.id)) {
+            return prev.filter(m => m.id !== tempId);
+          }
+          return prev.map(m => m.id === tempId ? message : m);
+        });
+      } else {
+        setMessages(prev => prev.filter(m => m.id !== tempId));
+      }
+    } catch {
+      setMessages(prev => prev.filter(m => m.id !== tempId));
     } finally {
       setSending(false);
     }
