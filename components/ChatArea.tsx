@@ -2,7 +2,11 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
-import { ArrowDown, Hash, ImagePlus, MessageCircle, Pin, Search, Send, X } from 'lucide-react';
+import {
+  ArrowDown, Bell, Hash, HelpCircle, Inbox,
+  MessageCircle, Pin, Plus, Search, Send,
+  Smile, Users, X,
+} from 'lucide-react';
 import { getPusherClient } from '@/lib/pusher-client';
 import { useUploadThing } from '@/lib/uploadthing';
 import MessageItem from './MessageItem';
@@ -34,6 +38,8 @@ interface Props {
   userName: string;
   onOpenSearch?: () => void;
   onViewProfile?: (userId: number) => void;
+  onToggleMembers?: () => void;
+  showMembersPanel?: boolean;
 }
 
 const TYPING_DEBOUNCE = 2000;
@@ -63,7 +69,7 @@ function needsDateDivider(messages: Message[], index: number): string | null {
   return date.toDateString() !== prevDate.toDateString() ? getDateLabel(date) : null;
 }
 
-export default function ChatArea({ channelId, channelName, userId, userName, onOpenSearch, onViewProfile }: Props) {
+export default function ChatArea({ channelId, channelName, userId, userName, onOpenSearch, onViewProfile, onToggleMembers, showMembersPanel }: Props) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [nextCursor, setNextCursor] = useState<number | null>(null);
   const [loadingMore, setLoadingMore] = useState(false);
@@ -466,30 +472,60 @@ export default function ChatArea({ channelId, channelName, userId, userName, onO
         )}
       </AnimatePresence>
 
-      <div className="flex items-center justify-between px-4 py-3 flex-shrink-0" style={{ borderBottom: '1px solid var(--border)', background: 'var(--bg-chat)' }}>
-        <div className="flex items-center gap-2">
-          <Hash size={18} style={{ color: 'var(--accent)' }} />
-          <h3 className="font-semibold text-sm" style={{ color: 'var(--text-1)' }}>{channelName}</h3>
+      {/* ── Discord-exact channel header ── */}
+      <div
+        className="flex items-center h-12 px-4 flex-shrink-0 gap-2"
+        style={{
+          background: 'var(--bg-chat)',
+          boxShadow: '0 1px 0 rgba(4,4,5,0.2),0 1.5px 0 rgba(6,6,7,0.05),0 2px 0 rgba(4,4,5,0.05)',
+        }}
+      >
+        {/* Left: icon + name */}
+        <div className="flex items-center gap-2 flex-1 min-w-0">
+          <Hash size={22} style={{ color: '#80848E', flexShrink: 0 }} />
+          <h3 className="font-bold text-[15px] truncate" style={{ color: '#F2F3F5' }}>{channelName}</h3>
+          {/* Vertical divider */}
+          <div className="flex-shrink-0 w-px h-6 mx-1" style={{ background: 'rgba(79,84,92,0.48)' }} />
+          {/* Pin indicator */}
           {pinnedMessages.length > 0 && (
             <button
               onClick={() => setShowPinned(p => !p)}
-              className="flex items-center gap-1 text-xs px-2 py-0.5 rounded-full transition-colors hover:bg-white/10"
-              style={{ color: showPinned ? 'var(--accent)' : 'var(--text-3)' }}
+              className="flex items-center gap-1 text-xs px-1.5 py-0.5 rounded transition-colors hover:bg-white/10"
+              style={{ color: showPinned ? '#5865F2' : '#80848E' }}
             >
-              <Pin size={11} /> {pinnedMessages.length}
+              <Pin size={13} /> {pinnedMessages.length} pinned
             </button>
           )}
         </div>
-        {onOpenSearch && (
-          <button
-            onClick={onOpenSearch}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs transition-colors hover:bg-white/[0.06]"
-            style={{ color: 'var(--text-2)', border: '1px solid var(--border)' }}
-          >
-            <Search size={13} />
-            <span>Search</span>
-          </button>
-        )}
+
+        {/* Right: Discord toolbar icons */}
+        <div className="flex items-center gap-0.5 flex-shrink-0">
+          <HeaderIconBtn title="Notifications" onClick={() => {}}>
+            <Bell size={20} />
+          </HeaderIconBtn>
+          <HeaderIconBtn title="Pinned Messages" onClick={() => setShowPinned(p => !p)} active={showPinned}>
+            <Pin size={20} />
+          </HeaderIconBtn>
+          {onToggleMembers && (
+            <HeaderIconBtn title="Show Member List" onClick={onToggleMembers} active={!!showMembersPanel}>
+              <Users size={20} />
+            </HeaderIconBtn>
+          )}
+          <div className="w-px h-6 mx-1" style={{ background: 'rgba(79,84,92,0.48)' }} />
+          {onOpenSearch && (
+            <div className="flex items-center rounded gap-1 px-2 h-7 cursor-text" style={{ background: '#1E1F22', minWidth: 120 }}
+              onClick={onOpenSearch}>
+              <Search size={14} style={{ color: '#80848E' }} />
+              <span className="text-sm" style={{ color: '#80848E' }}>Search</span>
+            </div>
+          )}
+          <HeaderIconBtn title="Inbox" onClick={() => {}}>
+            <Inbox size={20} />
+          </HeaderIconBtn>
+          <HeaderIconBtn title="Help" onClick={() => {}}>
+            <HelpCircle size={20} />
+          </HeaderIconBtn>
+        </div>
       </div>
 
       <AnimatePresence>
@@ -593,7 +629,9 @@ export default function ChatArea({ channelId, channelName, userId, userName, onO
         )}
       </AnimatePresence>
 
+      {/* ── Discord-exact message input ── */}
       <div className="px-4 pb-6 pt-2 flex-shrink-0">
+        {/* Reply banner */}
         <AnimatePresence>
           {replyTarget && (
             <motion.div
@@ -601,15 +639,15 @@ export default function ChatArea({ channelId, channelName, userId, userName, onO
               animate={{ height: 'auto', opacity: 1 }}
               exit={{ height: 0, opacity: 0 }}
               transition={{ duration: 0.15 }}
-              className="flex items-center justify-between px-3 py-2 mb-1 rounded-t-xl text-xs overflow-hidden"
-              style={{ background: 'var(--bg-elevated)', borderLeft: '3px solid var(--accent)' }}
+              className="flex items-center justify-between px-3 py-2 rounded-t-lg text-xs overflow-hidden"
+              style={{ background: '#383A40', borderLeft: '3px solid #5865F2' }}
             >
               <div className="flex items-center gap-1.5 min-w-0">
-                <span style={{ color: 'var(--text-3)' }}>Replying to</span>
-                <span className="font-semibold" style={{ color: 'var(--accent)' }}>{replyTarget.userName}</span>
-                <span className="truncate" style={{ color: 'var(--text-3)' }}>{replyTarget.content.slice(0, 60)}</span>
+                <span style={{ color: '#949BA4' }}>Replying to</span>
+                <span className="font-semibold" style={{ color: '#5865F2' }}>{replyTarget.userName}</span>
+                <span className="truncate" style={{ color: '#949BA4' }}>{replyTarget.content.slice(0, 60)}</span>
               </div>
-              <button onClick={() => setReplyTarget(null)} className="flex-shrink-0 p-0.5 rounded hover:bg-white/10" style={{ color: 'var(--text-3)' }}>
+              <button onClick={() => setReplyTarget(null)} className="flex-shrink-0 p-0.5 rounded hover:bg-white/10" style={{ color: '#949BA4' }}>
                 <X size={12} />
               </button>
             </motion.div>
@@ -617,44 +655,67 @@ export default function ChatArea({ channelId, channelName, userId, userName, onO
         </AnimatePresence>
 
         <form onSubmit={sendMessage}>
-          <div className="flex items-center gap-3 px-4 rounded-xl transition-shadow" style={{ background: 'var(--bg-elevated)', border: '1px solid var(--border)' }}>
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept="image/*"
-              className="hidden"
-              onChange={handleFilePick}
-            />
+          <div
+            className="flex items-center rounded-lg overflow-hidden"
+            style={{ background: '#383A40' }}
+          >
+            <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={handleFilePick} />
+
+            {/* + attachment button */}
             <button
               type="button"
               onClick={() => fileInputRef.current?.click()}
               disabled={isUploading}
-              title="Upload image"
-              className="flex-shrink-0 flex h-7 w-7 items-center justify-center rounded-lg transition-colors hover:bg-white/10 disabled:opacity-40"
-              style={{ color: 'var(--text-3)' }}
+              title="Add an attachment"
+              className="flex-shrink-0 mx-4 my-3 w-6 h-6 flex items-center justify-center rounded-full transition-colors hover:bg-white/20 disabled:opacity-40"
+              style={{ background: '#B5BAC1', color: '#313338' }}
             >
-              <ImagePlus size={16} />
+              <Plus size={18} strokeWidth={2.5} />
             </button>
+
+            {/* Text input */}
             <textarea
               ref={inputRef}
               value={input}
               onChange={e => handleInputChange(e.target.value)}
               onKeyDown={handleInputKey}
-              placeholder={replyTarget ? `Reply to ${replyTarget.userName}...` : `Message #${channelName}`}
+              placeholder={replyTarget ? `Reply to ${replyTarget.userName}…` : `Message #${channelName}`}
               rows={1}
-              className="flex-1 bg-transparent py-3.5 text-sm outline-none resize-none"
-              style={{ color: 'var(--text-1)', maxHeight: '160px' }}
+              className="flex-1 bg-transparent py-[11px] text-[15px] outline-none resize-none leading-[1.375rem]"
+              style={{ color: '#DCDDDE', maxHeight: '160px' }}
             />
-            <motion.button
-              type="submit"
-              disabled={!input.trim() || sending}
-              whileHover={{ scale: 1.1 }}
-              whileTap={{ scale: 0.9 }}
-              className="flex-shrink-0 w-7 h-7 rounded-lg flex items-center justify-center transition-all disabled:opacity-30"
-              style={{ background: input.trim() ? 'var(--accent)' : 'transparent', color: input.trim() ? '#fff' : 'var(--text-3)' }}
-            >
-              <Send size={14} />
-            </motion.button>
+
+            {/* Right: emoji + send */}
+            <div className="flex items-center gap-0.5 pr-3 flex-shrink-0">
+              <button
+                type="button"
+                title="Open GIF picker"
+                className="h-9 px-1 flex items-center justify-center rounded transition-colors hover:bg-white/10"
+                style={{ color: '#80848E' }}
+              >
+                <span className="text-sm font-bold">GIF</span>
+              </button>
+              <button
+                type="button"
+                title="Open emoji picker"
+                className="h-9 w-9 flex items-center justify-center rounded transition-colors hover:bg-white/10"
+                style={{ color: '#80848E' }}
+              >
+                <Smile size={22} />
+              </button>
+              {input.trim() && (
+                <motion.button
+                  type="submit"
+                  disabled={sending}
+                  whileHover={{ scale: 1.1 }}
+                  whileTap={{ scale: 0.9 }}
+                  className="h-9 w-9 flex items-center justify-center rounded-lg disabled:opacity-30"
+                  style={{ background: '#5865F2', color: '#fff' }}
+                >
+                  <Send size={16} />
+                </motion.button>
+              )}
+            </div>
           </div>
         </form>
       </div>
@@ -672,6 +733,21 @@ export default function ChatArea({ channelId, channelName, userId, userName, onO
         )}
       </AnimatePresence>
     </div>
+  );
+}
+
+function HeaderIconBtn({ children, title, onClick, active }: {
+  children: React.ReactNode; title: string; onClick: () => void; active?: boolean;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      title={title}
+      className="w-9 h-9 flex items-center justify-center rounded transition-colors hover:bg-white/10"
+      style={{ color: active ? '#F2F3F5' : '#80848E' }}
+    >
+      {children}
+    </button>
   );
 }
 

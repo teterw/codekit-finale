@@ -2,7 +2,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Menu, Users, X, Zap } from 'lucide-react';
+import { Menu, X, Zap } from 'lucide-react';
 import LandingPage from './LandingPage';
 import ServerSidebar from './ServerSidebar';
 import ChannelSidebar from './ChannelSidebar';
@@ -362,40 +362,11 @@ export default function MainApp() {
             <Menu size={20} />
           </button>
           {selectedServer && (
-            <>
-              <span className="font-semibold text-sm truncate" style={{ color: 'var(--text-1)' }}>
-                {selectedServer.name}
-              </span>
-              <button
-                onClick={() => setShowMembersPanel(true)}
-                className="ml-auto p-1.5 rounded-lg hover:bg-white/10 transition-colors"
-                style={{ color: 'var(--text-2)' }}
-                aria-label="Open members panel"
-              >
-                <Users size={20} />
-              </button>
-            </>
-          )}
-        </div>
-
-        {selectedServer && (
-          <div
-            className="hidden md:flex items-center justify-between px-4 py-3 border-b flex-shrink-0"
-            style={{ borderBottom: '1px solid var(--border)', background: 'var(--bg-chat)' }}
-          >
             <span className="font-semibold text-sm truncate" style={{ color: 'var(--text-1)' }}>
               {selectedServer.name}
             </span>
-            <button
-              onClick={() => setShowMembersPanel(v => !v)}
-              className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold hover:bg-white/10 transition-colors"
-              style={{ color: 'var(--text-2)' }}
-            >
-              <Users size={16} />
-              Members
-            </button>
-          </div>
-        )}
+          )}
+        </div>
 
         <AnimatePresence mode="wait">
           {!selectedChannel ? (
@@ -446,21 +417,23 @@ export default function MainApp() {
                 userId={userId}
                 userName={userName}
                 onOpenSearch={() => setShowSearchModal(true)}
+                onToggleMembers={() => setShowMembersPanel(v => !v)}
+                showMembersPanel={showMembersPanel}
               />
             </motion.div>
           )}
         </AnimatePresence>
       </main>
 
+      {/* Desktop: inline member list (Discord style — 240 px) */}
       <AnimatePresence>
         {showMembersPanel && selectedServer && (
           <motion.aside
-            initial={{ x: 320, opacity: 0 }}
-            animate={{ x: 0, opacity: 1 }}
-            exit={{ x: 320, opacity: 0 }}
-            transition={{ duration: 0.25, ease: 'easeOut' }}
-            className="hidden md:flex flex-col h-full w-[320px]"
-            style={{ zIndex: 30 }}
+            initial={{ width: 0, opacity: 0 }}
+            animate={{ width: 240, opacity: 1 }}
+            exit={{ width: 0, opacity: 0 }}
+            transition={{ duration: 0.2, ease: 'easeOut' }}
+            className="hidden md:flex flex-col h-full flex-shrink-0 overflow-hidden"
           >
             <MemberSidebar
               serverName={selectedServer.name}
@@ -475,22 +448,20 @@ export default function MainApp() {
         )}
       </AnimatePresence>
 
+      {/* Mobile: slide-in drawer */}
       <AnimatePresence>
         {showMembersPanel && selectedServer && (
           <>
             <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
+              initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
               className="fixed inset-0 bg-black/60 z-40 md:hidden"
               onClick={() => setShowMembersPanel(false)}
             />
             <motion.div
-              initial={{ x: 320, opacity: 0 }}
-              animate={{ x: 0, opacity: 1 }}
-              exit={{ x: 320, opacity: 0 }}
+              initial={{ x: 280, opacity: 0 }} animate={{ x: 0, opacity: 1 }}
+              exit={{ x: 280, opacity: 0 }}
               transition={{ duration: 0.25, ease: 'easeOut' }}
-              className="fixed right-0 top-0 bottom-0 z-50 w-[90vw] max-w-sm md:hidden"
+              className="fixed right-0 top-0 bottom-0 z-50 w-[280px] md:hidden"
             >
               <MemberSidebar
                 serverName={selectedServer.name}

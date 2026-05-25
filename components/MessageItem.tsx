@@ -2,19 +2,13 @@
 import { memo, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { AnimatePresence, motion } from 'framer-motion';
-import { Check, MessageCircle, Pencil, Pin, Reply, SmilePlus, Trash2, X } from 'lucide-react';
+import { Check, Copy, MessageCircle, Pencil, Pin, Reply, SmilePlus, Trash2, X } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 
 const EMOJIS = [
-  '\u{1F44D}',
-  '\u2764\uFE0F',
-  '\u{1F602}',
-  '\u{1F62E}',
-  '\u{1F622}',
-  '\u{1F389}',
-  '\u{1F525}',
-  '\u{1F621}',
+  '\uD83D\uDC4D','\u2764\uFE0F','\uD83D\uDE02','\uD83D\uDE2E','\uD83D\uDE22','\uD83C\uDF89','\uD83D\uDD25','\uD83D\uDE21',
+  '\uD83D\uDC40','\u2705','\uD83D\uDE4C','\uD83D\uDCAF','\uD83D\uDE0D','\uD83E\uDD14','\uD83D\uDE2D','\uD83E\uDD73',
 ];
 
 interface Reaction { emoji: string; count: number; userReacted: boolean; }
@@ -78,19 +72,22 @@ function MessageItem({
   const [editContent, setEditContent] = useState(message.content);
   const [saving, setSaving] = useState(false);
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
   const pickerRef = useRef<HTMLDivElement>(null);
+  const contextRef = useRef<HTMLDivElement>(null);
   const isOwn = message.userId === currentUserId;
 
   useEffect(() => {
-    if (!showEmojiPicker) return;
+    if (!showEmojiPicker && !contextMenu) return;
     function handleClick(e: MouseEvent) {
-      if (pickerRef.current && !pickerRef.current.contains(e.target as Node)) {
+      if (pickerRef.current && !pickerRef.current.contains(e.target as Node))
         setShowEmojiPicker(false);
-      }
+      if (contextRef.current && !contextRef.current.contains(e.target as Node))
+        setContextMenu(null);
     }
     document.addEventListener('mousedown', handleClick);
     return () => document.removeEventListener('mousedown', handleClick);
-  }, [showEmojiPicker]);
+  }, [showEmojiPicker, contextMenu]);
 
   const createdDate = new Date(message.createdAt);
   const updatedDate = new Date(message.updatedAt);
@@ -144,10 +141,21 @@ function MessageItem({
     }
   }
 
+  function handleContextMenu(e: React.MouseEvent) {
+    e.preventDefault();
+    setContextMenu({ x: e.clientX, y: e.clientY });
+  }
+
+  function copyText() {
+    navigator.clipboard.writeText(message.content);
+    setContextMenu(null);
+  }
+
   return (
     <div
       className="message-hover group relative flex items-start gap-4 px-4"
       style={{ paddingTop: isGrouped ? '2px' : '17px', paddingBottom: '2px' }}
+      onContextMenu={handleContextMenu}
     >
       <div className="w-10 flex-shrink-0 flex justify-center">
         {isGrouped ? (
@@ -308,8 +316,8 @@ function MessageItem({
                       animate={{ opacity: 1, scale: 1, y: 0 }}
                       exit={{ opacity: 0, scale: 0.9, y: 4 }}
                       transition={{ duration: 0.12 }}
-                      className="absolute bottom-full mb-1 right-0 flex gap-1 p-1.5 rounded-xl shadow-xl z-50"
-                      style={{ background: 'var(--bg-elevated)', border: '1px solid var(--border)' }}
+                      className="absolute bottom-full mb-1 right-0 grid grid-cols-4 gap-0.5 p-2 rounded shadow-xl z-50"
+                      style={{ background: '#111214', border: '1px solid rgba(0,0,0,0.6)' }}
                     >
                       {EMOJIS.map(emoji => (
                         <motion.button
@@ -317,7 +325,7 @@ function MessageItem({
                           whileHover={{ scale: 1.3 }}
                           whileTap={{ scale: 0.9 }}
                           onClick={() => { onReaction(message.id, emoji); setShowEmojiPicker(false); }}
-                          className="w-8 h-8 flex items-center justify-center rounded-lg text-base transition-colors hover:bg-white/10"
+                          className="w-8 h-8 flex items-center justify-center rounded text-base transition-colors hover:bg-white/10"
                         >
                           {emoji}
                         </motion.button>
@@ -356,7 +364,61 @@ function MessageItem({
           </motion.div>
         )}
       </AnimatePresence>
+
+      {/* Right-click context menu */}
+      {contextMenu && (
+        <>
+          <div className="fixed inset-0 z-40" onClick={() => setContextMenu(null)} />
+          <div
+            ref={contextRef}
+            className="fixed z-50 rounded py-1 shadow-2xl w-52"
+            style={{
+              top: Math.min(contextMenu.y, window.innerHeight - 260),
+              left: Math.min(contextMenu.x, window.innerWidth - 220),
+              background: '#111214',
+              border: '1px solid rgba(0,0,0,0.6)',
+            }}
+          >
+            {onReply && (
+              <CtxItem icon={<Reply size={16} />} label="Reply" onClick={() => { onReply(message); setContextMenu(null); }} />
+            )}
+            {onReaction && (
+              <CtxItem icon={<SmilePlus size={16} />} label="Add Reaction" onClick={() => { setShowEmojiPicker(true); setContextMenu(null); }} />
+            )}
+            {onOpenThread && (
+              <CtxItem icon={<MessageCircle size={16} />} label="Create Thread" onClick={() => { onOpenThread(message); setContextMenu(null); }} />
+            )}
+            <CtxItem icon={<Copy size={16} />} label="Copy Text" onClick={copyText} />
+            {isOwn && (
+              <>
+                <div className="my-1 mx-2 h-px" style={{ background: 'rgba(79,84,92,0.3)' }} />
+                <CtxItem icon={<Pencil size={16} />} label="Edit Message" onClick={() => { setEditing(true); setEditContent(message.content); setContextMenu(null); }} />
+                <CtxItem icon={<Pin size={16} />} label={message.isPinned ? 'Unpin Message' : 'Pin Message'} onClick={() => { togglePin(); setContextMenu(null); }} />
+                <div className="my-1 mx-2 h-px" style={{ background: 'rgba(79,84,92,0.3)' }} />
+                <CtxItem icon={<Trash2 size={16} />} label="Delete Message" onClick={() => { deleteMsg(); setContextMenu(null); }} danger />
+              </>
+            )}
+          </div>
+        </>
+      )}
     </div>
+  );
+}
+
+function CtxItem({ icon, label, onClick, danger }: {
+  icon: React.ReactNode; label: string; onClick: () => void; danger?: boolean;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className="w-full flex items-center gap-2.5 px-3 py-[7px] text-sm text-left transition-colors"
+      style={{ color: danger ? '#F23F43' : '#DBDEE1' }}
+      onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = danger ? 'rgba(242,63,67,0.15)' : 'rgba(79,84,92,0.16)'; }}
+      onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = 'transparent'; }}
+    >
+      {icon}
+      {label}
+    </button>
   );
 }
 
