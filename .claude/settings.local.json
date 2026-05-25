@@ -6,7 +6,14 @@
       "Bash(curl -s -o /dev/null -w 'req __TRACKED_VAR__: %{time_total}s [%{http_code}]\\\\n' http://localhost:3000/api/voice/1 -H 'x-user-id: 1')",
       "Bash(curl -s -o /dev/null -w \"[HTTP %{http_code}]\\\\n\" \"http://localhost:3000/api/uploadthing\")",
       "Bash(curl -s -o /dev/null -w \"[HTTP %{http_code}] %{time_total}s\\\\n\" \"http://localhost:3000/\")",
-      "Bash(curl -s -o - -w \"\\\\n[HTTP %{http_code}]\\\\n\" \"http://localhost:3000/api/friends\" -X POST -H \"Content-Type: application/json\" -H \"x-user-id: 1\" -d '{\"targetUserId\":2}')"
+      "Bash(curl -s -o - -w \"\\\\n[HTTP %{http_code}]\\\\n\" \"http://localhost:3000/api/friends\" -X POST -H \"Content-Type: application/json\" -H \"x-user-id: 1\" -d '{\"targetUserId\":2}')",
+      "Bash(Get-ChildItem -Recurse -Force)",
+      "Bash(Select-Object FullName)",
+      "Bash(ConvertTo-Csv -NoTypeInformation)",
+      "Bash(ConvertFrom-Csv)",
+      "Bash(Select-Object -ExpandProperty FullName)",
+      "Bash(Sort-Object)",
+      "Bash(bun run *)"
     ]
   }
 }
